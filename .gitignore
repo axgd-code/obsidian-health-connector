@@ -6,3 +6,51 @@ node_modules/
 
 # Environment file (may contain secrets)
 .env
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build output
+build/
+
+# Dependency directories
+jspm_packages/
+
+# Optional npm cache directory
+.npm/
+
+# dotenv environment variables
+.env.*
+
+# macOS system files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# macOS resource fork files
+._*
+
+# macOS Finder directory attributes
+.Spotlight-V100
+.Trashes
+
+# macOS Disk Image files
+*.dmg
+
+# VS Code settings
+.vscode/
+
+# Coverage directory
+coverage/
+
+# Misc
+*.local
+*.sublime*
+.idea/
+*.swp
+
+# Obsidian plugin packaging
+.obsidian-packaged.json
