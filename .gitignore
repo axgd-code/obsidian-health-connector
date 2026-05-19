@@ -1,0 +1,8 @@
+# Generated plugin packages
+dist/*.zip
+
+# Node modules
+node_modules/
+
+# Environment file (may contain secrets)
+.env

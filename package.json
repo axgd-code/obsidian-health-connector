@@ -1,0 +1,28 @@
+{
+  "name": "obsidian-health-connector",
+  "version": "1.0.1",
+  "scripts": {
+    "dev": "rollup -c -w",
+    "build": "rollup -c && mkdir -p dist && cp main.js manifest.json styles.css dist/ && cp main.js manifest.json styles.css \"/Users/axgd/Library/CloudStorage/SynologyDrive-syncOD/Notes/.obsidian/plugins/obsidian-health-connector/\"",
+    "test": "vitest",
+    "package": "npm run build && (cd dist && zip -r ${npm_package_name}-${npm_package_version}.zip main.js manifest.json styles.css) && echo 'Created dist/${npm_package_name}-${npm_package_version}.zip'",
+    "get-steps": "node scripts/get_steps.js",
+    "debug": "node --enable-source-maps --inspect-brk main.js"
+  },
+  "devDependencies": {
+    "@rollup/plugin-commonjs": "^23.0.0",
+    "@rollup/plugin-json": "^5.0.2",
+    "@rollup/plugin-node-resolve": "^15.0.0",
+    "@types/node": "^24.10.1",
+    "obsidian": "latest",
+    "rollup": "^3.0.0",
+    "rollup-plugin-esbuild": "^6.2.1",
+    "rollup-plugin-typescript2": "^0.34.0",
+    "typescript": "^5.0.0",
+    "vitest": "^4.0.16"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "garmin-connect-obsidian": "^1.0.1"
+  }
+}

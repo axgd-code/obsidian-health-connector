@@ -1,0 +1,11 @@
+{
+  "id": "obsidian-health-connector",
+  "name": "Health Connector",
+  "version": "1.0.1",
+  "minAppVersion": "1.5.0",
+  "description": "Connecteur santé générique : récupère des données (Garmin, etc.) et les ajoute à vos notes.",
+  "author": "Axel Guillerme",
+  "isDesktopOnly": false,
+  "js": "main.js",
+  "css": "styles.css"
+}
