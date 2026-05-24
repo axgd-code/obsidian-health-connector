@@ -1,9 +1,12 @@
 {
   "name": "health-connector",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "scripts": {
+    "sync:version": "node scripts/sync_versions.js",
     "dev": "rollup -c --bundleConfigAsCjs -w",
-    "build": "rollup -c --bundleConfigAsCjs && mkdir -p dist && cp main.js manifest.json styles.css dist/",
+    "build:root": "npm run sync:version && rollup -c --bundleConfigAsCjs",
+    "build:dist": "mkdir -p dist && cp main.js manifest.json styles.css dist/",
+    "build": "npm run build:root && npm run build:dist",
     "deploy:obsidian": "test -n \"$OBSIDIAN_PLUGIN_DIR/health-connector\" && cp main.js manifest.json styles.css \"$OBSIDIAN_PLUGIN_DIR/health-connector\"",
     "test": "vitest",
     "package": "npm run build && (cd dist && zip -r ${npm_package_name}-${npm_package_version}.zip main.js manifest.json styles.css) && echo 'Created dist/${npm_package_name}-${npm_package_version}.zip'",

@@ -26514,17 +26514,8 @@ function requireFunctionBind () {
 	return functionBind;
 }
 
-var functionCall;
-var hasRequiredFunctionCall;
-
-function requireFunctionCall () {
-	if (hasRequiredFunctionCall) return functionCall;
-	hasRequiredFunctionCall = 1;
-
-	/** @type {import('./functionCall')} */
-	functionCall = Function.prototype.call;
-	return functionCall;
-}
+/** @type {import('./functionCall')} */
+var functionCall = Function.prototype.call;
 
 var functionApply;
 var hasRequiredFunctionApply;
@@ -26544,7 +26535,7 @@ var reflectApply = typeof Reflect !== 'undefined' && Reflect && Reflect.apply;
 var bind$2 = requireFunctionBind();
 
 var $apply$1 = requireFunctionApply();
-var $call$2 = requireFunctionCall();
+var $call$2 = functionCall;
 var $reflectApply = reflectApply;
 
 /** @type {import('./actualApply')} */
@@ -26553,7 +26544,7 @@ var actualApply = $reflectApply || bind$2.call($call$2, $apply$1);
 var bind$1 = requireFunctionBind();
 var $TypeError$4 = type;
 
-var $call$1 = requireFunctionCall();
+var $call$1 = functionCall;
 var $actualApply = actualApply;
 
 /** @type {(args: [Function, thisArg?: unknown, ...args: unknown[]]) => Function} TODO FIXME, find a way to use import('.') */
@@ -26712,7 +26703,7 @@ var $ObjectGPO = requireObject_getPrototypeOf();
 var $ReflectGPO = requireReflect_getPrototypeOf();
 
 var $apply = requireFunctionApply();
-var $call = requireFunctionCall();
+var $call = functionCall;
 
 var needsEval = {};
 
@@ -38514,6 +38505,44 @@ function getLocale(obsidianLang) {
   return locales[langCode] || en;
 }
 
+const maxNullable = (values) => {
+  const present = values.filter((value) => value !== null && value !== void 0);
+  if (present.length === 0) return null;
+  return Number(Math.max(...present).toFixed(2));
+};
+function pickAverageHeartRate(entries) {
+  const garminAverageHeartRate = entries.find((entry) => entry.key === "garmin" && entry.data.averageHeartRate !== null)?.data.averageHeartRate;
+  if (garminAverageHeartRate !== void 0 && garminAverageHeartRate !== null) {
+    return garminAverageHeartRate;
+  }
+  return maxNullable(entries.map((entry) => entry.data.averageHeartRate));
+}
+function mergeProviderHealthData(entries) {
+  if (entries.length === 0) return null;
+  const allData = entries.map((entry) => entry.data);
+  const sports = [...new Set(allData.flatMap((data) => data.sports ?? []))];
+  return {
+    steps: maxNullable(allData.map((data) => data.steps)),
+    weight: maxNullable(allData.map((data) => data.weight)),
+    averageHeartRate: pickAverageHeartRate(entries),
+    hrv: maxNullable(allData.map((data) => data.hrv)),
+    stress: maxNullable(allData.map((data) => data.stress)),
+    bodyBattery: maxNullable(allData.map((data) => data.bodyBattery)),
+    spO2: maxNullable(allData.map((data) => data.spO2)),
+    sleep: maxNullable(allData.map((data) => data.sleep)),
+    sleepScore: maxNullable(allData.map((data) => data.sleepScore)),
+    sports,
+    transport_km: maxNullable(allData.map((data) => data.transport_km)),
+    didRunning: allData.some((data) => data.didRunning),
+    runningDistance_km: maxNullable(allData.map((data) => data.runningDistance_km)),
+    didSwimming: allData.some((data) => data.didSwimming),
+    SwimmingDistance_km: maxNullable(allData.map((data) => data.SwimmingDistance_km)),
+    didCycling: allData.some((data) => data.didCycling),
+    cyclingDistance_km: maxNullable(allData.map((data) => data.cyclingDistance_km)),
+    otherActivities: allData.some((data) => data.otherActivities)
+  };
+}
+
 class HealthConnectorPlugin extends obsidian.Plugin {
   constructor() {
     super(...arguments);
@@ -38780,7 +38809,7 @@ class HealthConnectorPlugin extends obsidian.Plugin {
           try {
             const data = await service.getData(date);
             successfulProviders.push(key);
-            return data;
+            return { key, data };
           } catch (e) {
             logger.warn(`Provider ${key} failed to fetch data:`, e);
             return null;
@@ -38788,7 +38817,7 @@ class HealthConnectorPlugin extends obsidian.Plugin {
         })
       );
       return {
-        data: this.mergeProviderHealthData(fetched.filter((d) => d !== null)),
+        data: mergeProviderHealthData(fetched.filter((entry) => entry !== null)),
         successfulProviders,
         attemptedProviders
       };
@@ -38847,35 +38876,6 @@ class HealthConnectorPlugin extends obsidian.Plugin {
       ].join(":");
     }
     return [key, this.settings.username || "", this.settings.password || ""].join(":");
-  }
-  mergeProviderHealthData(allData) {
-    if (allData.length === 0) return null;
-    const maxNullable = (values) => {
-      const present = values.filter((v) => v !== null && v !== void 0);
-      if (present.length === 0) return null;
-      return Number(Math.max(...present).toFixed(2));
-    };
-    const sports = [...new Set(allData.flatMap((d) => d.sports ?? []))];
-    return {
-      steps: maxNullable(allData.map((d) => d.steps)),
-      weight: maxNullable(allData.map((d) => d.weight)),
-      averageHeartRate: maxNullable(allData.map((d) => d.averageHeartRate)),
-      hrv: maxNullable(allData.map((d) => d.hrv)),
-      stress: maxNullable(allData.map((d) => d.stress)),
-      bodyBattery: maxNullable(allData.map((d) => d.bodyBattery)),
-      spO2: maxNullable(allData.map((d) => d.spO2)),
-      sleep: maxNullable(allData.map((d) => d.sleep)),
-      sleepScore: maxNullable(allData.map((d) => d.sleepScore)),
-      sports,
-      transport_km: maxNullable(allData.map((d) => d.transport_km)),
-      didRunning: allData.some((d) => d.didRunning),
-      runningDistance_km: maxNullable(allData.map((d) => d.runningDistance_km)),
-      didSwimming: allData.some((d) => d.didSwimming),
-      SwimmingDistance_km: maxNullable(allData.map((d) => d.SwimmingDistance_km)),
-      didCycling: allData.some((d) => d.didCycling),
-      cyclingDistance_km: maxNullable(allData.map((d) => d.cyclingDistance_km)),
-      otherActivities: allData.some((d) => d.otherActivities)
-    };
   }
   // Resolve a provider by key
   resolveProvider(key) {

@@ -13,6 +13,7 @@ import { DEFAULT_SETTINGS } from "../config/config";
 import { GOOGLE_OAUTH_CONFIG } from "../config/oauth";
 import { getLocale } from "../i18n";
 import { logger } from "../common/Logger";
+import { mergeProviderHealthData } from "../common/mergeHealthData";
 
 interface HealthConnectorSettings {
   username: string;
@@ -365,7 +366,7 @@ export default class HealthConnectorPlugin extends Plugin {
           try {
             const data = await service.getData(date);
             successfulProviders.push(key);
-            return data;
+            return { key, data };
           } catch (e) {
             logger.warn(`Provider ${key} failed to fetch data:`, e);
             return null;
@@ -374,7 +375,7 @@ export default class HealthConnectorPlugin extends Plugin {
       );
 
       return {
-        data: this.mergeProviderHealthData(fetched.filter((d): d is HealthData => d !== null)),
+        data: mergeProviderHealthData(fetched.filter((entry): entry is { key: ProviderKey; data: HealthData } => entry !== null)),
         successfulProviders,
         attemptedProviders,
       };
@@ -444,40 +445,6 @@ export default class HealthConnectorPlugin extends Plugin {
     }
 
     return [key, this.settings.username || '', this.settings.password || ''].join(':');
-  }
-
-  private mergeProviderHealthData(allData: HealthData[]): HealthData | null {
-    if (allData.length === 0) return null;
-
-    // Merge rule: keep the highest numeric value, and keep boolean true if any provider is true.
-    const maxNullable = (values: Array<number | null | undefined>): number | null => {
-      const present = values.filter((v): v is number => v !== null && v !== undefined);
-      if (present.length === 0) return null;
-      return Number(Math.max(...present).toFixed(2));
-    };
-
-    const sports = [...new Set(allData.flatMap((d) => d.sports ?? []))];
-
-    return {
-      steps: maxNullable(allData.map((d) => d.steps)),
-      weight: maxNullable(allData.map((d) => d.weight)),
-      averageHeartRate: maxNullable(allData.map((d) => d.averageHeartRate)),
-      hrv: maxNullable(allData.map((d) => d.hrv)),
-      stress: maxNullable(allData.map((d) => d.stress)),
-      bodyBattery: maxNullable(allData.map((d) => d.bodyBattery)),
-      spO2: maxNullable(allData.map((d) => d.spO2)),
-      sleep: maxNullable(allData.map((d) => d.sleep)),
-      sleepScore: maxNullable(allData.map((d) => d.sleepScore)),
-      sports,
-      transport_km: maxNullable(allData.map((d) => d.transport_km)),
-      didRunning: allData.some((d) => d.didRunning),
-      runningDistance_km: maxNullable(allData.map((d) => d.runningDistance_km)),
-      didSwimming: allData.some((d) => d.didSwimming),
-      SwimmingDistance_km: maxNullable(allData.map((d) => d.SwimmingDistance_km)),
-      didCycling: allData.some((d) => d.didCycling),
-      cyclingDistance_km: maxNullable(allData.map((d) => d.cyclingDistance_km)),
-      otherActivities: allData.some((d) => d.otherActivities),
-    };
   }
 
   // Resolve a provider by key
