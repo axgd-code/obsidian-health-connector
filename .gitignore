@@ -56,7 +56,6 @@ coverage/
 .obsidian-packaged.json
 
 # Generated local bundle artifacts
-main.js
 main.js.map
 
 # Lockfiles (project policy)
