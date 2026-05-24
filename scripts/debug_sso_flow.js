@@ -3,7 +3,7 @@
  * logging every cookie received and sent, to understand what Obsidian 
  * requestUrl would need.
  */
-require('dotenv').config();
+require('./load_env').loadEnv();
 
 // Simple querystring stringify (no external dep)
 function qsStringify(obj) {

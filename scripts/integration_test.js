@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('./load_env').loadEnv();
 const { GarminConnect } = require('garmin-connect');
 
 async function test() {
