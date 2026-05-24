@@ -1,6 +1,6 @@
 {
   "name": "health-connector",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "scripts": {
     "sync:version": "node scripts/sync_versions.js",
     "dev": "rollup -c --bundleConfigAsCjs -w",
