@@ -4,18 +4,785 @@ var obsidian = require('obsidian');
 var require$$0 = require('util');
 
 function _mergeNamespaces(n, m) {
-	m.forEach(function (e) {
-		e && typeof e !== 'string' && !Array.isArray(e) && Object.keys(e).forEach(function (k) {
-			if (k !== 'default' && !(k in n)) {
-				var d = Object.getOwnPropertyDescriptor(e, k);
-				Object.defineProperty(n, k, d.get ? d : {
-					enumerable: true,
-					get: function () { return e[k]; }
-				});
-			}
-		});
-	});
-	return Object.freeze(n);
+  m.forEach(function (e) {
+    e && typeof e !== 'string' && !Array.isArray(e) && Object.keys(e).forEach(function (k) {
+      if (k !== 'default' && !(k in n)) {
+        var d = Object.getOwnPropertyDescriptor(e, k);
+        Object.defineProperty(n, k, d.get ? d : {
+          enumerable: true,
+          get: function () { return e[k]; }
+        });
+      }
+    });
+  });
+  return Object.freeze(n);
+}
+
+const DEFAULT_SETTINGS = {
+  vaultFolder: "obsidian-garmin-plugin",
+  provider: "garmin",
+  enabledProviders: ["garmin"],
+  stravaClientId: "",
+  stravaExpiresAt: 0,
+  googleClientId: "",
+  googleExpiresAt: 0
+};
+
+const GOOGLE_OAUTH_CONFIG = {
+  // Optional legacy values. Preferred source is plugin settings UI.
+  clientId: "",
+  clientSecret: "",
+  // Must exactly match one Authorized redirect URI in Google Cloud OAuth credentials.
+  redirectUri: "http://127.0.0.1:53682/google/oauth/callback"
+};
+
+var en = {
+  commands: {
+    addTodayToFrontmatter: "Add today's health data to active file properties",
+    addDateToFrontmatter: "Add health data for a date to active file properties",
+    batchCreateNotes: "Create health notes for a date range"
+  },
+  notices: {
+    noteCreated: (date) => `Garmin note (${date}) created!`,
+    noActiveFile: "No active file",
+    invalidDate: "Invalid date",
+    addedToFile: "Health data added to active file",
+    addedToFileFromProviders: (providers) => `Health data fetched from: ${providers}`,
+    fetchError: "Unable to fetch health data",
+    interactiveAuth: "Garmin login blocked: interactive auth returned. Use external/headless auth.",
+    dateNotFoundInFile: "Date not found in file (frontmatter date: YYYY-MM-DD or filename YYYY-MM-DD.md)",
+    loadingHealthData: "Fetching health data...",
+    stravaMissingCredentials: "Strava: set Client ID and Client Secret first.",
+    stravaAuthorizeBrowser: "Authorize access in the browser that just opened...",
+    stravaConnected: "Strava connected successfully!",
+    stravaError: (message) => `Strava: ${message}`,
+    googleMissingCredentials: "Google Health: set Client ID and Client Secret first.",
+    googleAuthorizeBrowser: "Authorize Google Health access in your browser...",
+    googleConnected: "Google Health connected successfully.",
+    googleError: (message) => `Google Health: ${message}`,
+    batchInvalidRange: "Invalid date range",
+    batchRangeTooLong: (days) => `Range too long (${days} days > 90). Reduce the range.`,
+    batchCreating: (days) => `Creating ${days} notes...`,
+    batchProgress: (created, total) => `${created}/${total} notes created...`,
+    batchCreated: (count) => `${count} note(s) created`,
+    batchSkipped: (count) => `${count} already existing`,
+    batchErrors: (count) => `${count} error(s)`
+  },
+  modal: {
+    dateLabel: "Date (YYYY-MM-DD)",
+    ok: "OK",
+    cancel: "Cancel",
+    loading: "Fetching data\u2026",
+    healthEntryTitle: (date) => `Health data - ${date}`,
+    healthEntryLoading: "Fetching provider data...",
+    healthEntryProviderUnavailable: "Provider unavailable - manual entry",
+    healthEntryProviderReceived: "Provider data received",
+    healthEntrySteps: "\u{1F463} Steps",
+    healthEntrySleep: "\u{1F4A4} Sleep (min)",
+    healthEntrySleepScore: "\u{1F4A4} Sleep score",
+    healthEntryHeartRate: "\u2764\uFE0F Resting HR (bpm)",
+    healthEntryWeight: "\u2696\uFE0F Weight (kg)",
+    healthEntrySport: "\u{1F3C5} Sport",
+    healthEntrySportPlaceholder: "e.g. \u{1F3C3} \u{1F3CA}",
+    healthEntryTransport: "\u{1F6B2} Cycling - transport (km)",
+    healthEntrySave: "Save",
+    batchTitle: "Create health notes",
+    batchStartLabel: "Start date",
+    batchEndLabel: "End date",
+    batchSubmit: "Create notes",
+    batchFolder: "Destination folder",
+    batchFolderPlaceholder: "e.g. Journal/Health",
+    folderSearchPlaceholder: "Search a folder...",
+    browseFolder: "Browse",
+    batchCount: (days) => `${days} note(s) to create`,
+    batchInvalidRange: "Invalid range",
+    batchInvalidRangeCheck: "Invalid range - please check dates"
+  },
+  auth: {
+    successTitle: (provider) => `${provider} connected`,
+    successCloseTab: "You can close this tab and return to Obsidian.",
+    errorTitle: "Error",
+    deniedDefault: "access denied",
+    internalError: "error"
+  },
+  settings: {
+    title: "Health Connector",
+    username: "Username",
+    usernameDesc: "Your Garmin Connect login",
+    password: "Password",
+    passwordDesc: "Your Garmin Connect password",
+    labelShowPassword: "Show password",
+    labelHidePassword: "Hide password",
+    vaultFolder: "Storage folder",
+    vaultFolderDesc: "Where to save Garmin notes in your vault",
+    supportTitle: "Support development",
+    supportDesc: "If you enjoy having your Garmin data in Obsidian, consider supporting its development",
+    supportButton: "\u2615\uFE0F Tip",
+    providerGarminName: "Garmin",
+    providerGarminDesc: "Enable Garmin sync",
+    providerStravaName: "Strava",
+    providerStravaDesc: "Enable Strava sync",
+    providerGoogleName: "Google Health",
+    providerGoogleDesc: "Enable Google Health sync",
+    garminSectionTitle: "Garmin Connect",
+    garminEmailPlaceholder: "Garmin email",
+    stravaSectionTitle: "Strava",
+    stravaClientIdName: "Client ID",
+    stravaClientIdDesc: "Your Strava app client ID (strava.com/settings/api)",
+    stravaClientSecretName: "Client Secret",
+    stravaClientSecretDesc: "Your Strava app client secret",
+    stravaConnectName: "Strava connection",
+    stravaConnectedDesc: "Account connected. Click to reconnect.",
+    stravaDisconnectedDesc: "Click to authorize access to your Strava activities.",
+    reconnectButton: "Reconnect",
+    stravaConnectButton: "Connect Strava",
+    googleSectionTitle: "Google Health",
+    googleClientIdName: "Client ID",
+    googleClientIdDesc: "OAuth Client ID from Google Cloud",
+    googleClientIdPlaceholder: "e.g. xxxxx.apps.googleusercontent.com",
+    googleClientSecretName: "Client Secret",
+    googleClientSecretDesc: "OAuth Client Secret from Google Cloud",
+    googleConnectName: "Google Health connection",
+    googleConnectedDesc: "Account connected. Click to reconnect.",
+    googleDisconnectedDesc: "Click to authorize access to Google Health/Fit.",
+    googleConnectButton: "Connect Google"
+  },
+  template: {
+    title: "Health Stats",
+    steps: "Steps",
+    weight: "Weight",
+    avgHeartRate: "Average heart rate",
+    running: "Running",
+    cycling: "Cycling",
+    swimming: "Swimming",
+    noData: "N/A"
+  }
+};
+
+var fr = {
+  commands: {
+    addTodayToFrontmatter: "Ajouter les donn\xE9es sant\xE9 du jour aux propri\xE9t\xE9s du fichier actif",
+    addDateToFrontmatter: "Ajouter les donn\xE9es sant\xE9 d'une date aux propri\xE9t\xE9s du fichier actif",
+    batchCreateNotes: "Cr\xE9er les notes de sant\xE9 pour une plage de dates"
+  },
+  notices: {
+    noteCreated: (date) => `Note Garmin (${date}) cr\xE9\xE9e !`,
+    noActiveFile: "Aucun fichier actif",
+    invalidDate: "Date invalide",
+    addedToFile: "Donn\xE9es sant\xE9 ajout\xE9es au fichier actif",
+    addedToFileFromProviders: (providers) => `Donn\xE9es sant\xE9 r\xE9cup\xE9r\xE9es depuis : ${providers}`,
+    fetchError: "Impossible de r\xE9cup\xE9rer les donn\xE9es sant\xE9",
+    interactiveAuth: "Connexion Garmin bloqu\xE9e : page d'authentification interactive retourn\xE9e. Utilise une m\xE9thode d'authentification externe ou headless.",
+    dateNotFoundInFile: "Date introuvable dans le fichier (frontmatter date: YYYY-MM-DD ou nom de fichier YYYY-MM-DD.md)",
+    loadingHealthData: "R\xE9cup\xE9ration des donn\xE9es sant\xE9...",
+    stravaMissingCredentials: "Strava : renseigne d'abord le Client ID et le Client Secret.",
+    stravaAuthorizeBrowser: "Autorise l'acc\xE8s dans le navigateur qui vient de s'ouvrir...",
+    stravaConnected: "Strava connect\xE9 avec succ\xE8s !",
+    stravaError: (message) => `Strava : ${message}`,
+    googleMissingCredentials: "Google Health : renseigne d'abord le Client ID et le Client Secret.",
+    googleAuthorizeBrowser: "Autorise l'acc\xE8s Google Health dans le navigateur...",
+    googleConnected: "Google Health connect\xE9 avec succ\xE8s.",
+    googleError: (message) => `Google Health : ${message}`,
+    batchInvalidRange: "Plage de dates invalide",
+    batchRangeTooLong: (days) => `Plage trop longue (${days} jours > 90). R\xE9duis la plage.`,
+    batchCreating: (days) => `Cr\xE9ation de ${days} notes...`,
+    batchProgress: (created, total) => `${created}/${total} notes cr\xE9\xE9es...`,
+    batchCreated: (count) => `${count} note(s) cr\xE9\xE9e(s)`,
+    batchSkipped: (count) => `${count} d\xE9j\xE0 existante(s)`,
+    batchErrors: (count) => `${count} erreur(s)`
+  },
+  modal: {
+    dateLabel: "Date (JJ-MM-AAAA)",
+    ok: "OK",
+    cancel: "Annuler",
+    loading: "R\xE9cup\xE9ration des donn\xE9es\u2026",
+    healthEntryTitle: (date) => `Donn\xE9es sant\xE9 - ${date}`,
+    healthEntryLoading: "R\xE9cup\xE9ration provider en cours...",
+    healthEntryProviderUnavailable: "Provider indisponible - saisie manuelle",
+    healthEntryProviderReceived: "Donn\xE9es re\xE7ues du provider",
+    healthEntrySteps: "\u{1F463} Pas",
+    healthEntrySleep: "\u{1F4A4} Sommeil (min)",
+    healthEntrySleepScore: "\u{1F4A4} Score sommeil",
+    healthEntryHeartRate: "\u2764\uFE0F FC repos (bpm)",
+    healthEntryWeight: "\u2696\uFE0F Poids (kg)",
+    healthEntrySport: "\u{1F3C5} Sport",
+    healthEntrySportPlaceholder: "ex : \u{1F3C3} \u{1F3CA}",
+    healthEntryTransport: "\u{1F6B2} V\xE9lo - transport (km)",
+    healthEntrySave: "Enregistrer",
+    batchTitle: "Cr\xE9er les notes de sant\xE9",
+    batchStartLabel: "Date de d\xE9but",
+    batchEndLabel: "Date de fin",
+    batchSubmit: "Cr\xE9er les notes",
+    batchFolder: "Dossier de destination",
+    batchFolderPlaceholder: "ex : Journal/Sant\xE9",
+    folderSearchPlaceholder: "Rechercher un dossier...",
+    browseFolder: "Parcourir",
+    batchCount: (days) => `${days} note(s) \xE0 cr\xE9er`,
+    batchInvalidRange: "Plage invalide",
+    batchInvalidRangeCheck: "Plage invalide - v\xE9rifie les dates"
+  },
+  auth: {
+    successTitle: (provider) => `${provider} connect\xE9`,
+    successCloseTab: "Tu peux fermer cet onglet et retourner dans Obsidian.",
+    errorTitle: "Erreur",
+    deniedDefault: "acc\xE8s refus\xE9",
+    internalError: "erreur"
+  },
+  settings: {
+    title: "Health Connector",
+    username: "Nom d'utilisateur",
+    usernameDesc: "Votre login Garmin Connect",
+    password: "Mot de passe",
+    passwordDesc: "Votre mot de passe Garmin Connect",
+    labelShowPassword: "Afficher le mot de passe",
+    labelHidePassword: "Masquer le mot de passe",
+    vaultFolder: "Dossier de stockage",
+    vaultFolderDesc: "O\xF9 enregistrer les notes Garmin dans votre coffre ?",
+    supportTitle: "Soutenir le d\xE9veloppement",
+    supportDesc: "Si vous appr\xE9ciez pouvoir retrouver vos donn\xE9es Garmin dans Obsidian, n'h\xE9sitez pas \xE0 soutenir son d\xE9veloppement",
+    supportButton: "\u2615\uFE0F Pourboire",
+    providerGarminName: "Garmin",
+    providerGarminDesc: "Activer la synchronisation Garmin",
+    providerStravaName: "Strava",
+    providerStravaDesc: "Activer la synchronisation Strava",
+    providerGoogleName: "Google Health",
+    providerGoogleDesc: "Activer la synchronisation Google Health",
+    garminSectionTitle: "Garmin Connect",
+    garminEmailPlaceholder: "email Garmin",
+    stravaSectionTitle: "Strava",
+    stravaClientIdName: "Client ID",
+    stravaClientIdDesc: "ID de ton application Strava (strava.com/settings/api)",
+    stravaClientSecretName: "Client Secret",
+    stravaClientSecretDesc: "Secret de ton application Strava",
+    stravaConnectName: "Connexion Strava",
+    stravaConnectedDesc: "Compte connect\xE9. Clique pour reconnecter.",
+    stravaDisconnectedDesc: "Clique pour autoriser l'acc\xE8s \xE0 tes activit\xE9s Strava.",
+    reconnectButton: "Reconnecter",
+    stravaConnectButton: "Connecter Strava",
+    googleSectionTitle: "Google Health",
+    googleClientIdName: "Client ID",
+    googleClientIdDesc: "ID OAuth de ton application Google Cloud",
+    googleClientIdPlaceholder: "ex. xxxxx.apps.googleusercontent.com",
+    googleClientSecretName: "Client Secret",
+    googleClientSecretDesc: "Secret OAuth de ton application Google Cloud",
+    googleConnectName: "Connexion Google Health",
+    googleConnectedDesc: "Compte connect\xE9. Clique pour reconnecter.",
+    googleDisconnectedDesc: "Clique pour autoriser l'acc\xE8s \xE0 Google Health/Fit.",
+    googleConnectButton: "Connecter Google"
+  },
+  template: {
+    title: "Statistiques Sant\xE9",
+    steps: "Pas",
+    weight: "Poids",
+    avgHeartRate: "Fr\xE9quence cardiaque moyenne",
+    running: "Running",
+    cycling: "Cycling",
+    swimming: "Swimming",
+    noData: "N/A"
+  }
+};
+
+var es = {
+  commands: {
+    addTodayToFrontmatter: "Agregar datos de salud de hoy a las propiedades del archivo activo",
+    addDateToFrontmatter: "Agregar datos de salud de una fecha a las propiedades del archivo activo",
+    batchCreateNotes: "Crear notas de salud para un rango de fechas"
+  },
+  notices: {
+    noteCreated: (date) => `\xA1Nota de Garmin (${date}) creada!`,
+    noActiveFile: "No hay archivo activo",
+    invalidDate: "Fecha inv\xE1lida",
+    addedToFile: "Datos de salud agregados al archivo activo",
+    addedToFileFromProviders: (providers) => `Datos de salud obtenidos de: ${providers}`,
+    fetchError: "No se pueden obtener los datos de salud",
+    interactiveAuth: "Inicio de sesi\xF3n de Garmin bloqueado: se devolvi\xF3 autenticaci\xF3n interactiva. Usa autenticaci\xF3n externa o sin interfaz.",
+    dateNotFoundInFile: "Fecha no encontrada en el archivo (frontmatter date: YYYY-MM-DD o nombre YYYY-MM-DD.md)",
+    loadingHealthData: "Obteniendo datos de salud...",
+    stravaMissingCredentials: "Strava: primero completa Client ID y Client Secret.",
+    stravaAuthorizeBrowser: "Autoriza el acceso en el navegador que se abri\xF3...",
+    stravaConnected: "Strava conectado con \xE9xito.",
+    stravaError: (message) => `Strava: ${message}`,
+    googleMissingCredentials: "Google Health: primero completa Client ID y Client Secret.",
+    googleAuthorizeBrowser: "Autoriza el acceso a Google Health en el navegador...",
+    googleConnected: "Google Health conectado con \xE9xito.",
+    googleError: (message) => `Google Health: ${message}`,
+    batchInvalidRange: "Rango de fechas inv\xE1lido",
+    batchRangeTooLong: (days) => `Rango demasiado largo (${days} d\xEDas > 90). Reduce el rango.`,
+    batchCreating: (days) => `Creando ${days} notas...`,
+    batchProgress: (created, total) => `${created}/${total} notas creadas...`,
+    batchCreated: (count) => `${count} nota(s) creada(s)`,
+    batchSkipped: (count) => `${count} ya existente(s)`,
+    batchErrors: (count) => `${count} error(es)`
+  },
+  modal: {
+    dateLabel: "Fecha (DD-MM-YYYY)",
+    ok: "OK",
+    cancel: "Cancelar",
+    loading: "Obteniendo datos de Garmin\u2026",
+    healthEntryTitle: (date) => `Datos de salud - ${date}`,
+    healthEntryLoading: "Obteniendo datos del proveedor...",
+    healthEntryProviderUnavailable: "Proveedor no disponible - entrada manual",
+    healthEntryProviderReceived: "Datos recibidos del proveedor",
+    healthEntrySteps: "\u{1F463} Pasos",
+    healthEntrySleep: "\u{1F4A4} Sue\xF1o (min)",
+    healthEntrySleepScore: "\u{1F4A4} Puntuaci\xF3n de sue\xF1o",
+    healthEntryHeartRate: "\u2764\uFE0F FC en reposo (bpm)",
+    healthEntryWeight: "\u2696\uFE0F Peso (kg)",
+    healthEntrySport: "\u{1F3C5} Deporte",
+    healthEntrySportPlaceholder: "ej. \u{1F3C3} \u{1F3CA}",
+    healthEntryTransport: "\u{1F6B2} Ciclismo - transporte (km)",
+    healthEntrySave: "Guardar",
+    batchTitle: "Crear notas de salud",
+    batchStartLabel: "Fecha de inicio",
+    batchEndLabel: "Fecha de fin",
+    batchSubmit: "Crear notas",
+    batchFolder: "Carpeta de destino",
+    batchFolderPlaceholder: "ej.: Diario/Salud",
+    folderSearchPlaceholder: "Buscar carpeta...",
+    browseFolder: "Explorar",
+    batchCount: (days) => `${days} nota(s) por crear`,
+    batchInvalidRange: "Rango inv\xE1lido",
+    batchInvalidRangeCheck: "Rango inv\xE1lido - revisa las fechas"
+  },
+  auth: {
+    successTitle: (provider) => `${provider} conectado`,
+    successCloseTab: "Puedes cerrar esta pesta\xF1a y volver a Obsidian.",
+    errorTitle: "Error",
+    deniedDefault: "acceso denegado",
+    internalError: "error"
+  },
+  settings: {
+    title: "Health Connector",
+    username: "Nombre de usuario",
+    usernameDesc: "Tu login de Garmin Connect",
+    password: "Contrase\xF1a",
+    passwordDesc: "Tu contrase\xF1a de Garmin Connect",
+    labelShowPassword: "Mostrar contrase\xF1a",
+    labelHidePassword: "Ocultar contrase\xF1a",
+    vaultFolder: "Carpeta de almacenamiento",
+    vaultFolderDesc: "D\xF3nde guardar las notas de Garmin en tu vault",
+    supportTitle: "Apoya el desarrollo",
+    supportDesc: "Si te gusta poder ver tus datos de Garmin en Obsidian, considera apoyar su desarrollo",
+    supportButton: "\u2615\uFE0F Propina",
+    providerGarminName: "Garmin",
+    providerGarminDesc: "Activar sincronizaci\xF3n Garmin",
+    providerStravaName: "Strava",
+    providerStravaDesc: "Activar sincronizaci\xF3n Strava",
+    providerGoogleName: "Google Health",
+    providerGoogleDesc: "Activar sincronizaci\xF3n Google Health",
+    garminSectionTitle: "Garmin Connect",
+    garminEmailPlaceholder: "email Garmin",
+    stravaSectionTitle: "Strava",
+    stravaClientIdName: "Client ID",
+    stravaClientIdDesc: "ID de tu app Strava (strava.com/settings/api)",
+    stravaClientSecretName: "Client Secret",
+    stravaClientSecretDesc: "Secret de tu app Strava",
+    stravaConnectName: "Conexi\xF3n Strava",
+    stravaConnectedDesc: "Cuenta conectada. Haz clic para reconectar.",
+    stravaDisconnectedDesc: "Haz clic para autorizar acceso a tus actividades de Strava.",
+    reconnectButton: "Reconectar",
+    stravaConnectButton: "Conectar Strava",
+    googleSectionTitle: "Google Health",
+    googleClientIdName: "Client ID",
+    googleClientIdDesc: "ID OAuth de tu app en Google Cloud",
+    googleClientIdPlaceholder: "ej. xxxxx.apps.googleusercontent.com",
+    googleClientSecretName: "Client Secret",
+    googleClientSecretDesc: "Secret OAuth de tu app en Google Cloud",
+    googleConnectName: "Conexi\xF3n Google Health",
+    googleConnectedDesc: "Cuenta conectada. Haz clic para reconectar.",
+    googleDisconnectedDesc: "Haz clic para autorizar acceso a Google Health/Fit.",
+    googleConnectButton: "Conectar Google"
+  },
+  template: {
+    title: "Estad\xEDsticas de Salud",
+    steps: "Pasos",
+    weight: "Peso",
+    avgHeartRate: "Frecuencia card\xEDaca promedio",
+    running: "Correr",
+    cycling: "Ciclismo",
+    swimming: "Nataci\xF3n",
+    noData: "N/A"
+  }
+};
+
+const locales = {
+  en,
+  fr,
+  es
+};
+function getLocale(obsidianLang) {
+  if (!obsidianLang) return en;
+  const langCode = obsidianLang.split("-")[0].toLowerCase();
+  return locales[langCode] || en;
+}
+
+const LOG_LEVELS$1 = {
+  silent: 0,
+  error: 1,
+  warn: 2,
+  info: 3,
+  debug: 4
+};
+let Logger$2 = class Logger {
+  constructor(level = "error") {
+    this.level = level;
+  }
+  setLevel(level) {
+    this.level = level;
+  }
+  getLevel() {
+    return this.level;
+  }
+  shouldLog(level) {
+    return LOG_LEVELS$1[level] <= LOG_LEVELS$1[this.level];
+  }
+  error(...args) {
+    if (this.shouldLog("error")) {
+      console.error("\u274C", ...args);
+    }
+  }
+  warn(...args) {
+    if (this.shouldLog("warn")) {
+      console.warn("\u26A0\uFE0F ", ...args);
+    }
+  }
+  info(...args) {
+    if (this.shouldLog("info")) {
+      console.log("\u2139\uFE0F ", ...args);
+    }
+  }
+  debug(...args) {
+    if (this.shouldLog("debug")) {
+      console.log("\u{1F41B}", ...args);
+    }
+  }
+};
+const logger = new Logger$2();
+
+const maxNullable = (values) => {
+  const present = values.filter((value) => value !== null && value !== void 0);
+  if (present.length === 0) return null;
+  return Number(Math.max(...present).toFixed(2));
+};
+function pickAverageHeartRate(entries) {
+  const garminAverageHeartRate = entries.find((entry) => entry.key === "garmin" && entry.data.averageHeartRate !== null)?.data.averageHeartRate;
+  if (garminAverageHeartRate !== void 0 && garminAverageHeartRate !== null) {
+    return garminAverageHeartRate;
+  }
+  return maxNullable(entries.map((entry) => entry.data.averageHeartRate));
+}
+function mergeProviderHealthData(entries) {
+  if (entries.length === 0) return null;
+  const allData = entries.map((entry) => entry.data);
+  const sports = [...new Set(allData.flatMap((data) => data.sports ?? []))];
+  return {
+    steps: maxNullable(allData.map((data) => data.steps)),
+    weight: maxNullable(allData.map((data) => data.weight)),
+    averageHeartRate: pickAverageHeartRate(entries),
+    hrv: maxNullable(allData.map((data) => data.hrv)),
+    stress: maxNullable(allData.map((data) => data.stress)),
+    bodyBattery: maxNullable(allData.map((data) => data.bodyBattery)),
+    spO2: maxNullable(allData.map((data) => data.spO2)),
+    sleep: maxNullable(allData.map((data) => data.sleep)),
+    sleepScore: maxNullable(allData.map((data) => data.sleepScore)),
+    sports,
+    transport_km: maxNullable(allData.map((data) => data.transport_km)),
+    didRunning: allData.some((data) => data.didRunning),
+    runningDistance_km: maxNullable(allData.map((data) => data.runningDistance_km)),
+    didSwimming: allData.some((data) => data.didSwimming),
+    SwimmingDistance_km: maxNullable(allData.map((data) => data.SwimmingDistance_km)),
+    didCycling: allData.some((data) => data.didCycling),
+    cyclingDistance_km: maxNullable(allData.map((data) => data.cyclingDistance_km)),
+    otherActivities: allData.some((data) => data.otherActivities)
+  };
+}
+
+class ObsidianFrontmatterPort {
+  constructor(fileManager) {
+    this.fileManager = fileManager;
+  }
+  async processFrontmatter(file, updater) {
+    await this.fileManager.processFrontMatter(file, (frontmatter) => {
+      updater(frontmatter);
+    });
+  }
+}
+
+class WriteHealthFrontmatterUseCase {
+  constructor(frontmatterPort) {
+    this.frontmatterPort = frontmatterPort;
+  }
+  async execute(file, date, data) {
+    await this.frontmatterPort.processFrontmatter(file, (frontmatter) => {
+      this.applyDate(frontmatter, date);
+      this.applyMetrics(frontmatter, data);
+      this.applySports(frontmatter, data);
+      this.applyDistances(frontmatter, data);
+    });
+  }
+  applyDate(frontmatter, date) {
+    frontmatter.date = date.toISOString().slice(0, 10);
+  }
+  applyMetrics(frontmatter, data) {
+    this.set(frontmatter, "steps", data.steps);
+    this.set(frontmatter, "sleep", data.sleep);
+    this.set(frontmatter, "sleepScore", data.sleepScore);
+    this.set(frontmatter, "weight", data.weight);
+    this.set(frontmatter, "averageHeartRate", data.averageHeartRate);
+    this.set(frontmatter, "hrv", data.hrv);
+    this.set(frontmatter, "stress", data.stress);
+    this.set(frontmatter, "bodyBattery", data.bodyBattery);
+    this.set(frontmatter, "spO2", data.spO2);
+  }
+  applySports(frontmatter, data) {
+    if (!data.sports || data.sports.length === 0) return;
+    const incoming = data.sports.map((sport) => String(sport)).filter(Boolean);
+    if (incoming.length === 0) return;
+    const merged = [.../* @__PURE__ */ new Set([
+      ...this.toSportList(frontmatter.sport),
+      ...this.toSportList(frontmatter.sports),
+      ...incoming
+    ])];
+    frontmatter.sport = merged;
+  }
+  applyDistances(frontmatter, data) {
+    this.set(frontmatter, "runningDistance_km", data.runningDistance_km);
+    this.set(frontmatter, "SwimmingDistance_km", data.SwimmingDistance_km);
+    this.set(frontmatter, "transport_km", data.transport_km);
+  }
+  set(frontmatter, key, value) {
+    if (value !== void 0 && value !== null) {
+      frontmatter[key] = value;
+    }
+  }
+  toSportList(value) {
+    if (Array.isArray(value)) {
+      return value.map((item) => String(item)).filter(Boolean);
+    }
+    if (typeof value === "string") {
+      return value.split(/[\s,]+/).map((item) => item.trim()).filter(Boolean);
+    }
+    return [];
+  }
+}
+
+function buildHealthNoteContent(date, data) {
+  const dateStr = date.toISOString().slice(0, 10);
+  const yv = (v) => v !== null && v !== void 0 ? String(v) : '""';
+  const sportYaml = data?.sports && data.sports.length > 0 ? "\n  - " + data.sports.join("\n  - ") : " []";
+  return [
+    "---",
+    `date: "${dateStr}"`,
+    `weight: ${yv(data?.weight)}`,
+    `steps: ${yv(data?.steps)}`,
+    `sports:${sportYaml}`,
+    `sleep: ${yv(data?.sleep)}`,
+    `sleepScore: ${yv(data?.sleepScore)}`,
+    `averageHeartRate: ${yv(data?.averageHeartRate)}`,
+    `hrv: ${yv(data?.hrv)}`,
+    `stress: ${yv(data?.stress)}`,
+    `bodyBattery: ${yv(data?.bodyBattery)}`,
+    `spO2: ${yv(data?.spO2)}`,
+    `transport_km: ${yv(data?.transport_km)}`
+  ].join("\n");
+}
+
+const SECRET_IDS = {
+  garminUsername: "health-connector-garmin-username",
+  garminPassword: "health-connector-garmin-password",
+  garminTokenCache: "health-connector-garmin-token-cache",
+  stravaClientSecret: "health-connector-strava-client-secret",
+  stravaAccessToken: "health-connector-strava-access-token",
+  stravaRefreshToken: "health-connector-strava-refresh-token",
+  googleClientSecret: "health-connector-google-client-secret",
+  googleAccessToken: "health-connector-google-access-token",
+  googleRefreshToken: "health-connector-google-refresh-token"
+};
+const LEGACY_SECRET_FIELDS = [
+  { field: "username", secret: "garminUsername" },
+  { field: "password", secret: "garminPassword" },
+  { field: "stravaClientSecret", secret: "stravaClientSecret" },
+  { field: "stravaAccessToken", secret: "stravaAccessToken" },
+  { field: "stravaRefreshToken", secret: "stravaRefreshToken" },
+  { field: "googleClientSecret", secret: "googleClientSecret" },
+  { field: "googleAccessToken", secret: "googleAccessToken" },
+  { field: "googleRefreshToken", secret: "googleRefreshToken" }
+];
+class SecretSettingsService {
+  constructor(secretStorage, logger) {
+    this.secretStorage = secretStorage;
+    this.logger = logger;
+  }
+  get(secret) {
+    try {
+      return this.secretStorage.getSecret(SECRET_IDS[secret]) ?? "";
+    } catch (e) {
+      this.logger.warn(`Unable to read secret ${secret}:`, e);
+      return "";
+    }
+  }
+  set(secret, value) {
+    try {
+      this.secretStorage.setSecret(SECRET_IDS[secret], value);
+    } catch (e) {
+      this.logger.warn(`Unable to store secret ${secret}:`, e);
+    }
+  }
+  getGarminTokenCache() {
+    const raw = this.get("garminTokenCache");
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw);
+    } catch (e) {
+      this.logger.warn("Unable to parse Garmin token cache secret:", e);
+      return null;
+    }
+  }
+  setGarminTokenCache(tokens) {
+    if (tokens === null || tokens === void 0) {
+      this.set("garminTokenCache", "");
+      return;
+    }
+    try {
+      this.set("garminTokenCache", JSON.stringify(tokens));
+    } catch (e) {
+      this.logger.warn("Unable to serialize Garmin token cache secret:", e);
+    }
+  }
+  sanitizeSettingsForPersist(settings) {
+    for (const { field } of LEGACY_SECRET_FIELDS) {
+      settings[field] = "";
+    }
+    delete settings.tokens;
+  }
+  migrateLegacySecretsFromSettings(settings) {
+    let migrated = false;
+    for (const { field, secret } of LEGACY_SECRET_FIELDS) {
+      const raw = settings[field];
+      const value = typeof raw === "string" ? raw.trim() : "";
+      if (!value) continue;
+      this.set(secret, value);
+      settings[field] = "";
+      migrated = true;
+    }
+    return migrated;
+  }
+}
+
+function getEnabledProviders(settings) {
+  if (Array.isArray(settings.enabledProviders)) {
+    return settings.enabledProviders.map((p) => String(p).toLowerCase()).filter((p) => p === "garmin" || p === "strava" || p === "google");
+  }
+  const legacy = String(settings.provider || "garmin").toLowerCase();
+  if (legacy === "strava") return ["strava"];
+  if (legacy === "google") return ["google"];
+  return ["garmin"];
+}
+function buildProviderCredKey(key, settings, getSecret) {
+  if (key === "strava") {
+    return [
+      key,
+      settings.stravaClientId || "",
+      getSecret("stravaClientSecret"),
+      getSecret("stravaAccessToken"),
+      getSecret("stravaRefreshToken"),
+      String(settings.stravaExpiresAt || 0)
+    ].join(":");
+  }
+  if (key === "google") {
+    return [
+      key,
+      settings.googleClientId || "",
+      getSecret("googleClientSecret"),
+      getSecret("googleAccessToken"),
+      getSecret("googleRefreshToken"),
+      String(settings.googleExpiresAt || 0)
+    ].join(":");
+  }
+  return [key, getSecret("garminUsername"), getSecret("garminPassword")].join(":");
+}
+
+class HealthService {
+  constructor(provider) {
+    this.provider = provider;
+  }
+  async init() {
+    await this.provider.init();
+  }
+  async getData(date) {
+    return this.provider.getData(date);
+  }
+}
+
+class ProviderFetchOrchestrator {
+  constructor(deps) {
+    this.healthServices = /* @__PURE__ */ new Map();
+    this.healthServiceCredKeys = /* @__PURE__ */ new Map();
+    this.deps = deps;
+  }
+  clearCache() {
+    this.healthServices.clear();
+    this.healthServiceCredKeys.clear();
+  }
+  async fetch(date) {
+    const enabledProviders = this.deps.getEnabledProviders();
+    if (enabledProviders.length === 0) {
+      return { data: null, successfulProviders: [], attemptedProviders: [] };
+    }
+    const services = [];
+    const attemptedProviders = [...enabledProviders];
+    try {
+      for (const key of enabledProviders) {
+        const credKey = this.deps.buildProviderCredKey(key);
+        const existingService = this.healthServices.get(key);
+        const existingCredKey = this.healthServiceCredKeys.get(key);
+        if (!existingService || existingCredKey !== credKey) {
+          try {
+            const provider = this.deps.resolveProvider(key);
+            const service = new HealthService(provider);
+            await service.init();
+            this.healthServices.set(key, service);
+            this.healthServiceCredKeys.set(key, credKey);
+            services.push({ key, service });
+          } catch (e) {
+            this.deps.logger.warn(`Provider ${key} initialization failed:`, e);
+          }
+          continue;
+        }
+        services.push({ key, service: existingService });
+      }
+      if (services.length === 0) {
+        return { data: null, successfulProviders: [], attemptedProviders };
+      }
+      const successfulProviders = [];
+      const fetched = await Promise.all(
+        services.map(async ({ key, service }) => {
+          try {
+            const data = await service.getData(date);
+            successfulProviders.push(key);
+            return { key, data };
+          } catch (e) {
+            this.deps.logger.warn(`Provider ${key} failed to fetch data:`, e);
+            return null;
+          }
+        })
+      );
+      return {
+        data: this.deps.mergeProviderHealthData(
+          fetched.filter((entry) => entry !== null)
+        ),
+        successfulProviders,
+        attemptedProviders
+      };
+    } catch (e) {
+      if (e?.message === "InteractiveAuthRequired") {
+        return { data: null, successfulProviders: [], attemptedProviders };
+      }
+      this.clearCache();
+      this.deps.logger.error("fetchHealthData failed:", e);
+      return { data: null, successfulProviders: [], attemptedProviders };
+    }
+  }
 }
 
 var commonjsGlobal = typeof globalThis !== 'undefined' ? globalThis : typeof window !== 'undefined' ? window : typeof global !== 'undefined' ? global : typeof self !== 'undefined' ? self : {};
@@ -35936,21 +36703,21 @@ function requireBlowfish () {
 	}));
 } (cryptoJs));
 
-var Logger$2 = {};
+var Logger$1 = {};
 
 /**
  * Simple logger with configurable log levels
  */
-Object.defineProperty(Logger$2, "__esModule", { value: true });
-Logger$2.logger = Logger$2.Logger = void 0;
-const LOG_LEVELS$1 = {
+Object.defineProperty(Logger$1, "__esModule", { value: true });
+Logger$1.logger = Logger$1.Logger = void 0;
+const LOG_LEVELS = {
     silent: 0,
     error: 1,
     warn: 2,
     info: 3,
     debug: 4
 };
-let Logger$1 = class Logger {
+class Logger {
     constructor(level = 'error') {
         this.level = level;
     }
@@ -35961,7 +36728,7 @@ let Logger$1 = class Logger {
         return this.level;
     }
     shouldLog(level) {
-        return LOG_LEVELS$1[level] <= LOG_LEVELS$1[this.level];
+        return LOG_LEVELS[level] <= LOG_LEVELS[this.level];
     }
     error(...args) {
         if (this.shouldLog('error')) {
@@ -35983,10 +36750,10 @@ let Logger$1 = class Logger {
             console.log('🐛', ...args);
         }
     }
-};
-Logger$2.Logger = Logger$1;
+}
+Logger$1.Logger = Logger;
 // Export a default instance
-Logger$2.logger = new Logger$1();
+Logger$1.logger = new Logger();
 
 var __importDefault = (commonjsGlobal && commonjsGlobal.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
@@ -35998,7 +36765,7 @@ const luxon_1 = luxon;
 const oauth_1_0a_1 = __importDefault(oauth1_0aExports);
 const qs_1 = __importDefault(lib);
 const crypto_js_1 = __importDefault(cryptoJsExports);
-const Logger_1 = Logger$2;
+const Logger_1 = Logger$1;
 // Import Obsidian requestUrl function (with fallback)
 let requestUrl$2;
 try {
@@ -37341,52 +38108,9 @@ var types = {};
 var index = /*@__PURE__*/getDefaultExportFromCjs(dist);
 
 var GarminConnectModule = /*#__PURE__*/_mergeNamespaces({
-	__proto__: null,
-	default: index
+  __proto__: null,
+  default: index
 }, [dist]);
-
-const LOG_LEVELS = {
-  silent: 0,
-  error: 1,
-  warn: 2,
-  info: 3,
-  debug: 4
-};
-class Logger {
-  constructor(level = "error") {
-    this.level = level;
-  }
-  setLevel(level) {
-    this.level = level;
-  }
-  getLevel() {
-    return this.level;
-  }
-  shouldLog(level) {
-    return LOG_LEVELS[level] <= LOG_LEVELS[this.level];
-  }
-  error(...args) {
-    if (this.shouldLog("error")) {
-      console.error("\u274C", ...args);
-    }
-  }
-  warn(...args) {
-    if (this.shouldLog("warn")) {
-      console.warn("\u26A0\uFE0F ", ...args);
-    }
-  }
-  info(...args) {
-    if (this.shouldLog("info")) {
-      console.log("\u2139\uFE0F ", ...args);
-    }
-  }
-  debug(...args) {
-    if (this.shouldLog("debug")) {
-      console.log("\u{1F41B}", ...args);
-    }
-  }
-}
-const logger = new Logger();
 
 const { GarminConnect } = GarminConnectModule;
 function extractDistanceFromActivity(activity) {
@@ -38087,1243 +38811,77 @@ class GoogleHealthProvider {
   }
 }
 
-class HealthService {
-  constructor(provider) {
-    this.provider = provider;
-  }
-  async init() {
-    await this.provider.init();
-  }
-  async getData(date) {
-    return this.provider.getData(date);
-  }
-}
-
-const DEFAULT_SETTINGS = {
-  vaultFolder: "obsidian-garmin-plugin",
-  provider: "garmin",
-  enabledProviders: ["garmin"],
-  stravaClientId: "",
-  stravaExpiresAt: 0,
-  googleClientId: "",
-  googleExpiresAt: 0
-};
-
-const GOOGLE_OAUTH_CONFIG = {
-  // Optional legacy values. Preferred source is plugin settings UI.
-  clientId: "",
-  clientSecret: "",
-  // Must exactly match one Authorized redirect URI in Google Cloud OAuth credentials.
-  redirectUri: "http://127.0.0.1:53682/google/oauth/callback"
-};
-
-var en = {
-  commands: {
-    addTodayToFrontmatter: "Add today's health data to active file properties",
-    addDateToFrontmatter: "Add health data for a date to active file properties",
-    batchCreateNotes: "Create health notes for a date range"
-  },
-  notices: {
-    noteCreated: (date) => `Garmin note (${date}) created!`,
-    noActiveFile: "No active file",
-    invalidDate: "Invalid date",
-    addedToFile: "Health data added to active file",
-    addedToFileFromProviders: (providers) => `Health data fetched from: ${providers}`,
-    fetchError: "Unable to fetch health data",
-    interactiveAuth: "Garmin login blocked: interactive auth returned. Use external/headless auth.",
-    dateNotFoundInFile: "Date not found in file (frontmatter date: YYYY-MM-DD or filename YYYY-MM-DD.md)",
-    loadingHealthData: "Fetching health data...",
-    stravaMissingCredentials: "Strava: set Client ID and Client Secret first.",
-    stravaAuthorizeBrowser: "Authorize access in the browser that just opened...",
-    stravaConnected: "Strava connected successfully!",
-    stravaError: (message) => `Strava: ${message}`,
-    googleMissingCredentials: "Google Health: set Client ID and Client Secret first.",
-    googleAuthorizeBrowser: "Authorize Google Health access in your browser...",
-    googleConnected: "Google Health connected successfully.",
-    googleError: (message) => `Google Health: ${message}`,
-    batchInvalidRange: "Invalid date range",
-    batchRangeTooLong: (days) => `Range too long (${days} days > 90). Reduce the range.`,
-    batchCreating: (days) => `Creating ${days} notes...`,
-    batchProgress: (created, total) => `${created}/${total} notes created...`,
-    batchCreated: (count) => `${count} note(s) created`,
-    batchSkipped: (count) => `${count} already existing`,
-    batchErrors: (count) => `${count} error(s)`
-  },
-  modal: {
-    dateLabel: "Date (YYYY-MM-DD)",
-    ok: "OK",
-    cancel: "Cancel",
-    loading: "Fetching data\u2026",
-    healthEntryTitle: (date) => `Health data - ${date}`,
-    healthEntryLoading: "Fetching provider data...",
-    healthEntryProviderUnavailable: "Provider unavailable - manual entry",
-    healthEntryProviderReceived: "Provider data received",
-    healthEntrySteps: "\u{1F463} Steps",
-    healthEntrySleep: "\u{1F4A4} Sleep (min)",
-    healthEntrySleepScore: "\u{1F4A4} Sleep score",
-    healthEntryHeartRate: "\u2764\uFE0F Resting HR (bpm)",
-    healthEntryWeight: "\u2696\uFE0F Weight (kg)",
-    healthEntrySport: "\u{1F3C5} Sport",
-    healthEntrySportPlaceholder: "e.g. \u{1F3C3} \u{1F3CA}",
-    healthEntryTransport: "\u{1F6B2} Cycling - transport (km)",
-    healthEntrySave: "Save",
-    batchTitle: "Create health notes",
-    batchStartLabel: "Start date",
-    batchEndLabel: "End date",
-    batchSubmit: "Create notes",
-    batchFolder: "Destination folder",
-    batchFolderPlaceholder: "e.g. Journal/Health",
-    folderSearchPlaceholder: "Search a folder...",
-    browseFolder: "Browse",
-    batchCount: (days) => `${days} note(s) to create`,
-    batchInvalidRange: "Invalid range",
-    batchInvalidRangeCheck: "Invalid range - please check dates"
-  },
-  auth: {
-    successTitle: (provider) => `${provider} connected`,
-    successCloseTab: "You can close this tab and return to Obsidian.",
-    errorTitle: "Error",
-    deniedDefault: "access denied",
-    internalError: "error"
-  },
-  settings: {
-    title: "Health Connector",
-    username: "Username",
-    usernameDesc: "Your Garmin Connect login",
-    password: "Password",
-    passwordDesc: "Your Garmin Connect password",
-    labelShowPassword: "Show password",
-    labelHidePassword: "Hide password",
-    vaultFolder: "Storage folder",
-    vaultFolderDesc: "Where to save Garmin notes in your vault",
-    supportTitle: "Support development",
-    supportDesc: "If you enjoy having your Garmin data in Obsidian, consider supporting its development",
-    supportButton: "\u2615\uFE0F Tip",
-    providerGarminName: "Garmin",
-    providerGarminDesc: "Enable Garmin sync",
-    providerStravaName: "Strava",
-    providerStravaDesc: "Enable Strava sync",
-    providerGoogleName: "Google Health",
-    providerGoogleDesc: "Enable Google Health sync",
-    garminSectionTitle: "Garmin Connect",
-    garminEmailPlaceholder: "Garmin email",
-    stravaSectionTitle: "Strava",
-    stravaClientIdName: "Client ID",
-    stravaClientIdDesc: "Your Strava app client ID (strava.com/settings/api)",
-    stravaClientSecretName: "Client Secret",
-    stravaClientSecretDesc: "Your Strava app client secret",
-    stravaConnectName: "Strava connection",
-    stravaConnectedDesc: "Account connected. Click to reconnect.",
-    stravaDisconnectedDesc: "Click to authorize access to your Strava activities.",
-    reconnectButton: "Reconnect",
-    stravaConnectButton: "Connect Strava",
-    googleSectionTitle: "Google Health",
-    googleClientIdName: "Client ID",
-    googleClientIdDesc: "OAuth Client ID from Google Cloud",
-    googleClientIdPlaceholder: "e.g. xxxxx.apps.googleusercontent.com",
-    googleClientSecretName: "Client Secret",
-    googleClientSecretDesc: "OAuth Client Secret from Google Cloud",
-    googleConnectName: "Google Health connection",
-    googleConnectedDesc: "Account connected. Click to reconnect.",
-    googleDisconnectedDesc: "Click to authorize access to Google Health/Fit.",
-    googleConnectButton: "Connect Google"
-  },
-  template: {
-    title: "Health Stats",
-    steps: "Steps",
-    weight: "Weight",
-    avgHeartRate: "Average heart rate",
-    running: "Running",
-    cycling: "Cycling",
-    swimming: "Swimming",
-    noData: "N/A"
-  }
-};
-
-var fr = {
-  commands: {
-    addTodayToFrontmatter: "Ajouter les donn\xE9es sant\xE9 du jour aux propri\xE9t\xE9s du fichier actif",
-    addDateToFrontmatter: "Ajouter les donn\xE9es sant\xE9 d'une date aux propri\xE9t\xE9s du fichier actif",
-    batchCreateNotes: "Cr\xE9er les notes de sant\xE9 pour une plage de dates"
-  },
-  notices: {
-    noteCreated: (date) => `Note Garmin (${date}) cr\xE9\xE9e !`,
-    noActiveFile: "Aucun fichier actif",
-    invalidDate: "Date invalide",
-    addedToFile: "Donn\xE9es sant\xE9 ajout\xE9es au fichier actif",
-    addedToFileFromProviders: (providers) => `Donn\xE9es sant\xE9 r\xE9cup\xE9r\xE9es depuis : ${providers}`,
-    fetchError: "Impossible de r\xE9cup\xE9rer les donn\xE9es sant\xE9",
-    interactiveAuth: "Connexion Garmin bloqu\xE9e : page d'authentification interactive retourn\xE9e. Utilise une m\xE9thode d'authentification externe ou headless.",
-    dateNotFoundInFile: "Date introuvable dans le fichier (frontmatter date: YYYY-MM-DD ou nom de fichier YYYY-MM-DD.md)",
-    loadingHealthData: "R\xE9cup\xE9ration des donn\xE9es sant\xE9...",
-    stravaMissingCredentials: "Strava : renseigne d'abord le Client ID et le Client Secret.",
-    stravaAuthorizeBrowser: "Autorise l'acc\xE8s dans le navigateur qui vient de s'ouvrir...",
-    stravaConnected: "Strava connect\xE9 avec succ\xE8s !",
-    stravaError: (message) => `Strava : ${message}`,
-    googleMissingCredentials: "Google Health : renseigne d'abord le Client ID et le Client Secret.",
-    googleAuthorizeBrowser: "Autorise l'acc\xE8s Google Health dans le navigateur...",
-    googleConnected: "Google Health connect\xE9 avec succ\xE8s.",
-    googleError: (message) => `Google Health : ${message}`,
-    batchInvalidRange: "Plage de dates invalide",
-    batchRangeTooLong: (days) => `Plage trop longue (${days} jours > 90). R\xE9duis la plage.`,
-    batchCreating: (days) => `Cr\xE9ation de ${days} notes...`,
-    batchProgress: (created, total) => `${created}/${total} notes cr\xE9\xE9es...`,
-    batchCreated: (count) => `${count} note(s) cr\xE9\xE9e(s)`,
-    batchSkipped: (count) => `${count} d\xE9j\xE0 existante(s)`,
-    batchErrors: (count) => `${count} erreur(s)`
-  },
-  modal: {
-    dateLabel: "Date (JJ-MM-AAAA)",
-    ok: "OK",
-    cancel: "Annuler",
-    loading: "R\xE9cup\xE9ration des donn\xE9es\u2026",
-    healthEntryTitle: (date) => `Donn\xE9es sant\xE9 - ${date}`,
-    healthEntryLoading: "R\xE9cup\xE9ration provider en cours...",
-    healthEntryProviderUnavailable: "Provider indisponible - saisie manuelle",
-    healthEntryProviderReceived: "Donn\xE9es re\xE7ues du provider",
-    healthEntrySteps: "\u{1F463} Pas",
-    healthEntrySleep: "\u{1F4A4} Sommeil (min)",
-    healthEntrySleepScore: "\u{1F4A4} Score sommeil",
-    healthEntryHeartRate: "\u2764\uFE0F FC repos (bpm)",
-    healthEntryWeight: "\u2696\uFE0F Poids (kg)",
-    healthEntrySport: "\u{1F3C5} Sport",
-    healthEntrySportPlaceholder: "ex : \u{1F3C3} \u{1F3CA}",
-    healthEntryTransport: "\u{1F6B2} V\xE9lo - transport (km)",
-    healthEntrySave: "Enregistrer",
-    batchTitle: "Cr\xE9er les notes de sant\xE9",
-    batchStartLabel: "Date de d\xE9but",
-    batchEndLabel: "Date de fin",
-    batchSubmit: "Cr\xE9er les notes",
-    batchFolder: "Dossier de destination",
-    batchFolderPlaceholder: "ex : Journal/Sant\xE9",
-    folderSearchPlaceholder: "Rechercher un dossier...",
-    browseFolder: "Parcourir",
-    batchCount: (days) => `${days} note(s) \xE0 cr\xE9er`,
-    batchInvalidRange: "Plage invalide",
-    batchInvalidRangeCheck: "Plage invalide - v\xE9rifie les dates"
-  },
-  auth: {
-    successTitle: (provider) => `${provider} connect\xE9`,
-    successCloseTab: "Tu peux fermer cet onglet et retourner dans Obsidian.",
-    errorTitle: "Erreur",
-    deniedDefault: "acc\xE8s refus\xE9",
-    internalError: "erreur"
-  },
-  settings: {
-    title: "Health Connector",
-    username: "Nom d'utilisateur",
-    usernameDesc: "Votre login Garmin Connect",
-    password: "Mot de passe",
-    passwordDesc: "Votre mot de passe Garmin Connect",
-    labelShowPassword: "Afficher le mot de passe",
-    labelHidePassword: "Masquer le mot de passe",
-    vaultFolder: "Dossier de stockage",
-    vaultFolderDesc: "O\xF9 enregistrer les notes Garmin dans votre coffre ?",
-    supportTitle: "Soutenir le d\xE9veloppement",
-    supportDesc: "Si vous appr\xE9ciez pouvoir retrouver vos donn\xE9es Garmin dans Obsidian, n'h\xE9sitez pas \xE0 soutenir son d\xE9veloppement",
-    supportButton: "\u2615\uFE0F Pourboire",
-    providerGarminName: "Garmin",
-    providerGarminDesc: "Activer la synchronisation Garmin",
-    providerStravaName: "Strava",
-    providerStravaDesc: "Activer la synchronisation Strava",
-    providerGoogleName: "Google Health",
-    providerGoogleDesc: "Activer la synchronisation Google Health",
-    garminSectionTitle: "Garmin Connect",
-    garminEmailPlaceholder: "email Garmin",
-    stravaSectionTitle: "Strava",
-    stravaClientIdName: "Client ID",
-    stravaClientIdDesc: "ID de ton application Strava (strava.com/settings/api)",
-    stravaClientSecretName: "Client Secret",
-    stravaClientSecretDesc: "Secret de ton application Strava",
-    stravaConnectName: "Connexion Strava",
-    stravaConnectedDesc: "Compte connect\xE9. Clique pour reconnecter.",
-    stravaDisconnectedDesc: "Clique pour autoriser l'acc\xE8s \xE0 tes activit\xE9s Strava.",
-    reconnectButton: "Reconnecter",
-    stravaConnectButton: "Connecter Strava",
-    googleSectionTitle: "Google Health",
-    googleClientIdName: "Client ID",
-    googleClientIdDesc: "ID OAuth de ton application Google Cloud",
-    googleClientIdPlaceholder: "ex. xxxxx.apps.googleusercontent.com",
-    googleClientSecretName: "Client Secret",
-    googleClientSecretDesc: "Secret OAuth de ton application Google Cloud",
-    googleConnectName: "Connexion Google Health",
-    googleConnectedDesc: "Compte connect\xE9. Clique pour reconnecter.",
-    googleDisconnectedDesc: "Clique pour autoriser l'acc\xE8s \xE0 Google Health/Fit.",
-    googleConnectButton: "Connecter Google"
-  },
-  template: {
-    title: "Statistiques Sant\xE9",
-    steps: "Pas",
-    weight: "Poids",
-    avgHeartRate: "Fr\xE9quence cardiaque moyenne",
-    running: "Running",
-    cycling: "Cycling",
-    swimming: "Swimming",
-    noData: "N/A"
-  }
-};
-
-var es = {
-  commands: {
-    addTodayToFrontmatter: "Agregar datos de salud de hoy a las propiedades del archivo activo",
-    addDateToFrontmatter: "Agregar datos de salud de una fecha a las propiedades del archivo activo",
-    batchCreateNotes: "Crear notas de salud para un rango de fechas"
-  },
-  notices: {
-    noteCreated: (date) => `\xA1Nota de Garmin (${date}) creada!`,
-    noActiveFile: "No hay archivo activo",
-    invalidDate: "Fecha inv\xE1lida",
-    addedToFile: "Datos de salud agregados al archivo activo",
-    addedToFileFromProviders: (providers) => `Datos de salud obtenidos de: ${providers}`,
-    fetchError: "No se pueden obtener los datos de salud",
-    interactiveAuth: "Inicio de sesi\xF3n de Garmin bloqueado: se devolvi\xF3 autenticaci\xF3n interactiva. Usa autenticaci\xF3n externa o sin interfaz.",
-    dateNotFoundInFile: "Fecha no encontrada en el archivo (frontmatter date: YYYY-MM-DD o nombre YYYY-MM-DD.md)",
-    loadingHealthData: "Obteniendo datos de salud...",
-    stravaMissingCredentials: "Strava: primero completa Client ID y Client Secret.",
-    stravaAuthorizeBrowser: "Autoriza el acceso en el navegador que se abri\xF3...",
-    stravaConnected: "Strava conectado con \xE9xito.",
-    stravaError: (message) => `Strava: ${message}`,
-    googleMissingCredentials: "Google Health: primero completa Client ID y Client Secret.",
-    googleAuthorizeBrowser: "Autoriza el acceso a Google Health en el navegador...",
-    googleConnected: "Google Health conectado con \xE9xito.",
-    googleError: (message) => `Google Health: ${message}`,
-    batchInvalidRange: "Rango de fechas inv\xE1lido",
-    batchRangeTooLong: (days) => `Rango demasiado largo (${days} d\xEDas > 90). Reduce el rango.`,
-    batchCreating: (days) => `Creando ${days} notas...`,
-    batchProgress: (created, total) => `${created}/${total} notas creadas...`,
-    batchCreated: (count) => `${count} nota(s) creada(s)`,
-    batchSkipped: (count) => `${count} ya existente(s)`,
-    batchErrors: (count) => `${count} error(es)`
-  },
-  modal: {
-    dateLabel: "Fecha (DD-MM-YYYY)",
-    ok: "OK",
-    cancel: "Cancelar",
-    loading: "Obteniendo datos de Garmin\u2026",
-    healthEntryTitle: (date) => `Datos de salud - ${date}`,
-    healthEntryLoading: "Obteniendo datos del proveedor...",
-    healthEntryProviderUnavailable: "Proveedor no disponible - entrada manual",
-    healthEntryProviderReceived: "Datos recibidos del proveedor",
-    healthEntrySteps: "\u{1F463} Pasos",
-    healthEntrySleep: "\u{1F4A4} Sue\xF1o (min)",
-    healthEntrySleepScore: "\u{1F4A4} Puntuaci\xF3n de sue\xF1o",
-    healthEntryHeartRate: "\u2764\uFE0F FC en reposo (bpm)",
-    healthEntryWeight: "\u2696\uFE0F Peso (kg)",
-    healthEntrySport: "\u{1F3C5} Deporte",
-    healthEntrySportPlaceholder: "ej. \u{1F3C3} \u{1F3CA}",
-    healthEntryTransport: "\u{1F6B2} Ciclismo - transporte (km)",
-    healthEntrySave: "Guardar",
-    batchTitle: "Crear notas de salud",
-    batchStartLabel: "Fecha de inicio",
-    batchEndLabel: "Fecha de fin",
-    batchSubmit: "Crear notas",
-    batchFolder: "Carpeta de destino",
-    batchFolderPlaceholder: "ej.: Diario/Salud",
-    folderSearchPlaceholder: "Buscar carpeta...",
-    browseFolder: "Explorar",
-    batchCount: (days) => `${days} nota(s) por crear`,
-    batchInvalidRange: "Rango inv\xE1lido",
-    batchInvalidRangeCheck: "Rango inv\xE1lido - revisa las fechas"
-  },
-  auth: {
-    successTitle: (provider) => `${provider} conectado`,
-    successCloseTab: "Puedes cerrar esta pesta\xF1a y volver a Obsidian.",
-    errorTitle: "Error",
-    deniedDefault: "acceso denegado",
-    internalError: "error"
-  },
-  settings: {
-    title: "Health Connector",
-    username: "Nombre de usuario",
-    usernameDesc: "Tu login de Garmin Connect",
-    password: "Contrase\xF1a",
-    passwordDesc: "Tu contrase\xF1a de Garmin Connect",
-    labelShowPassword: "Mostrar contrase\xF1a",
-    labelHidePassword: "Ocultar contrase\xF1a",
-    vaultFolder: "Carpeta de almacenamiento",
-    vaultFolderDesc: "D\xF3nde guardar las notas de Garmin en tu vault",
-    supportTitle: "Apoya el desarrollo",
-    supportDesc: "Si te gusta poder ver tus datos de Garmin en Obsidian, considera apoyar su desarrollo",
-    supportButton: "\u2615\uFE0F Propina",
-    providerGarminName: "Garmin",
-    providerGarminDesc: "Activar sincronizaci\xF3n Garmin",
-    providerStravaName: "Strava",
-    providerStravaDesc: "Activar sincronizaci\xF3n Strava",
-    providerGoogleName: "Google Health",
-    providerGoogleDesc: "Activar sincronizaci\xF3n Google Health",
-    garminSectionTitle: "Garmin Connect",
-    garminEmailPlaceholder: "email Garmin",
-    stravaSectionTitle: "Strava",
-    stravaClientIdName: "Client ID",
-    stravaClientIdDesc: "ID de tu app Strava (strava.com/settings/api)",
-    stravaClientSecretName: "Client Secret",
-    stravaClientSecretDesc: "Secret de tu app Strava",
-    stravaConnectName: "Conexi\xF3n Strava",
-    stravaConnectedDesc: "Cuenta conectada. Haz clic para reconectar.",
-    stravaDisconnectedDesc: "Haz clic para autorizar acceso a tus actividades de Strava.",
-    reconnectButton: "Reconectar",
-    stravaConnectButton: "Conectar Strava",
-    googleSectionTitle: "Google Health",
-    googleClientIdName: "Client ID",
-    googleClientIdDesc: "ID OAuth de tu app en Google Cloud",
-    googleClientIdPlaceholder: "ej. xxxxx.apps.googleusercontent.com",
-    googleClientSecretName: "Client Secret",
-    googleClientSecretDesc: "Secret OAuth de tu app en Google Cloud",
-    googleConnectName: "Conexi\xF3n Google Health",
-    googleConnectedDesc: "Cuenta conectada. Haz clic para reconectar.",
-    googleDisconnectedDesc: "Haz clic para autorizar acceso a Google Health/Fit.",
-    googleConnectButton: "Conectar Google"
-  },
-  template: {
-    title: "Estad\xEDsticas de Salud",
-    steps: "Pasos",
-    weight: "Peso",
-    avgHeartRate: "Frecuencia card\xEDaca promedio",
-    running: "Correr",
-    cycling: "Ciclismo",
-    swimming: "Nataci\xF3n",
-    noData: "N/A"
-  }
-};
-
-const locales = {
-  en,
-  fr,
-  es
-};
-function getLocale(obsidianLang) {
-  if (!obsidianLang) return en;
-  const langCode = obsidianLang.split("-")[0].toLowerCase();
-  return locales[langCode] || en;
-}
-
-const maxNullable = (values) => {
-  const present = values.filter((value) => value !== null && value !== void 0);
-  if (present.length === 0) return null;
-  return Number(Math.max(...present).toFixed(2));
-};
-function pickAverageHeartRate(entries) {
-  const garminAverageHeartRate = entries.find((entry) => entry.key === "garmin" && entry.data.averageHeartRate !== null)?.data.averageHeartRate;
-  if (garminAverageHeartRate !== void 0 && garminAverageHeartRate !== null) {
-    return garminAverageHeartRate;
-  }
-  return maxNullable(entries.map((entry) => entry.data.averageHeartRate));
-}
-function mergeProviderHealthData(entries) {
-  if (entries.length === 0) return null;
-  const allData = entries.map((entry) => entry.data);
-  const sports = [...new Set(allData.flatMap((data) => data.sports ?? []))];
-  return {
-    steps: maxNullable(allData.map((data) => data.steps)),
-    weight: maxNullable(allData.map((data) => data.weight)),
-    averageHeartRate: pickAverageHeartRate(entries),
-    hrv: maxNullable(allData.map((data) => data.hrv)),
-    stress: maxNullable(allData.map((data) => data.stress)),
-    bodyBattery: maxNullable(allData.map((data) => data.bodyBattery)),
-    spO2: maxNullable(allData.map((data) => data.spO2)),
-    sleep: maxNullable(allData.map((data) => data.sleep)),
-    sleepScore: maxNullable(allData.map((data) => data.sleepScore)),
-    sports,
-    transport_km: maxNullable(allData.map((data) => data.transport_km)),
-    didRunning: allData.some((data) => data.didRunning),
-    runningDistance_km: maxNullable(allData.map((data) => data.runningDistance_km)),
-    didSwimming: allData.some((data) => data.didSwimming),
-    SwimmingDistance_km: maxNullable(allData.map((data) => data.SwimmingDistance_km)),
-    didCycling: allData.some((data) => data.didCycling),
-    cyclingDistance_km: maxNullable(allData.map((data) => data.cyclingDistance_km)),
-    otherActivities: allData.some((data) => data.otherActivities)
-  };
-}
-
-const SECRET_IDS = {
-  garminUsername: "health-connector-garmin-username",
-  garminPassword: "health-connector-garmin-password",
-  stravaClientSecret: "health-connector-strava-client-secret",
-  stravaAccessToken: "health-connector-strava-access-token",
-  stravaRefreshToken: "health-connector-strava-refresh-token",
-  googleClientSecret: "health-connector-google-client-secret",
-  googleAccessToken: "health-connector-google-access-token",
-  googleRefreshToken: "health-connector-google-refresh-token"
-};
-const LEGACY_SECRET_FIELDS = [
-  { field: "username", secret: "garminUsername" },
-  { field: "password", secret: "garminPassword" },
-  { field: "stravaClientSecret", secret: "stravaClientSecret" },
-  { field: "stravaAccessToken", secret: "stravaAccessToken" },
-  { field: "stravaRefreshToken", secret: "stravaRefreshToken" },
-  { field: "googleClientSecret", secret: "googleClientSecret" },
-  { field: "googleAccessToken", secret: "googleAccessToken" },
-  { field: "googleRefreshToken", secret: "googleRefreshToken" }
-];
-class HealthConnectorPlugin extends obsidian.Plugin {
-  constructor() {
-    super(...arguments);
-    this.i18n = getLocale();
-    this._healthServices = /* @__PURE__ */ new Map();
-    this._healthServiceCredKeys = /* @__PURE__ */ new Map();
-  }
-  getSecret(secret) {
-    try {
-      return this.app.secretStorage.getSecret(SECRET_IDS[secret]) ?? "";
-    } catch (e) {
-      logger.warn(`Unable to read secret ${secret}:`, e);
-      return "";
-    }
-  }
-  setSecret(secret, value) {
-    try {
-      this.app.secretStorage.setSecret(SECRET_IDS[secret], value);
-    } catch (e) {
-      logger.warn(`Unable to store secret ${secret}:`, e);
-    }
-  }
-  sanitizeSettingsForPersist() {
-    for (const { field } of LEGACY_SECRET_FIELDS) {
-      this.settings[field] = "";
-    }
-  }
-  migrateLegacySecretsFromSettings() {
-    let migrated = false;
-    for (const { field, secret } of LEGACY_SECRET_FIELDS) {
-      const raw = this.settings[field];
-      const value = typeof raw === "string" ? raw.trim() : "";
-      if (!value) continue;
-      this.setSecret(secret, value);
-      this.settings[field] = "";
-      migrated = true;
-    }
-    return migrated;
-  }
-  async onload() {
-    await this.loadSettings();
-    this.i18n = getLocale(this.app.vault?.adapter?.basePath ? this.app.language : void 0);
-    this.api = {
-      syncToday: async () => {
-        await this.writeProviderDataToActiveFile(/* @__PURE__ */ new Date());
-      },
-      syncDate: async (date) => {
-        await this.writeProviderDataToActiveFile(date);
-      }
-    };
-    try {
-      globalThis.__HealthConnectorPluginInstance = this;
-      const existing = await this.loadData() || {};
-      globalThis.__GarminTokenCache = existing.tokens || null;
-      globalThis.__GarminTokenStore = {
-        syncLoad: () => {
-          return globalThis.__GarminTokenCache || null;
-        },
-        syncSave: (tokens) => {
-          globalThis.__GarminTokenCache = tokens;
-          setTimeout(async () => {
-            try {
-              const data = await this.loadData() || {};
-              data.tokens = tokens;
-              await this.saveData(data);
-              logger.info("Tokens persisted via plugin data");
-            } catch (e) {
-              logger.warn("Failed to persist tokens via plugin data", e);
-            }
-          }, 0);
-        },
-        syncClear: () => {
-          globalThis.__GarminTokenCache = null;
-          setTimeout(async () => {
-            try {
-              const data = await this.loadData() || {};
-              delete data.tokens;
-              await this.saveData(data);
-              logger.info("Tokens cleared via plugin data");
-            } catch (e) {
-              logger.warn("Failed to clear tokens via plugin data", e);
-            }
-          }, 0);
-        }
-      };
-    } catch (e) {
-      logger.warn("Failed to initialize token store", e);
-    }
-    this.addCommand({
-      id: "health-add-today-to-frontmatter",
-      name: this.i18n.commands.addTodayToFrontmatter,
-      callback: async () => {
-        await this.addHealthDataForDateToActiveFile(/* @__PURE__ */ new Date());
-      }
-    });
-    this.addCommand({
-      id: "health-add-date-to-frontmatter",
-      name: this.i18n.commands.addDateToFrontmatter,
-      callback: async () => {
-        const file = this.app.workspace.getActiveFile();
-        if (!file) {
-          new obsidian.Notice(this.i18n.notices.noActiveFile);
-          return;
-        }
-        const d = await this.resolveDateFromFile(file);
-        if (!d) {
-          new obsidian.Notice(this.i18n.notices.dateNotFoundInFile);
-          return;
-        }
-        await this.addHealthDataForDateToActiveFile(d);
-      }
-    });
-    this.addSettingTab(new HealthConnectorSettingTab(this.app, this));
-    this.addCommand({
-      id: "health-batch-create-notes",
-      name: this.i18n.commands.batchCreateNotes,
-      callback: async () => {
-        const params = await this.promptForDateRange();
-        if (!params) return;
-        await this.batchCreateNotes(params.startDate, params.endDate, params.folder);
-      }
-    });
-  }
-  async onunload() {
-  }
-  // Health data access handled by `HealthService` with provider pattern
-  // The method to create standalone notes has been removed per configuration.
-  // Prompt the user for a date (YYYY-MM-DD) using a simple Modal and return the string or null.
-  async promptForDate() {
-    return new Promise((resolve) => {
-      const modal = new class extends obsidian.Modal {
-        constructor(app, resolveFn, plugin) {
-          super(app);
-          this.result = null;
-          this.resolve = resolveFn;
-          this.parentPlugin = plugin;
-        }
-        onOpen() {
-          const { contentEl } = this;
-          contentEl.createEl("h2", { text: this.parentPlugin.i18n.modal.dateLabel });
-          const inputContainer = contentEl.createDiv({ cls: "health-date-input-container" });
-          const input = inputContainer.createEl("input", { cls: "health-date-input" });
-          input.type = "date";
-          const btnRow = contentEl.createDiv({ cls: "health-modal-buttons" });
-          const ok = btnRow.createEl("button", { text: this.parentPlugin.i18n.modal.ok, cls: "mod-cta" });
-          const cancel = btnRow.createEl("button", { text: this.parentPlugin.i18n.modal.cancel });
-          ok.onclick = () => {
-            const v = input.value;
-            this.close();
-            this.resolve(v || null);
-          };
-          cancel.onclick = () => {
-            this.close();
-            this.resolve(null);
-          };
-        }
-        onClose() {
-          const { contentEl } = this;
-          contentEl.empty();
-        }
-      }(this.app, resolve, this);
-      modal.open();
-    });
-  }
-  // Retrieve health data for a date: open data-entry modal immediately, fetch
-  /**
-   * Silent write — used by the public API (Templater templates, etc.).
-   * Fetches provider data and writes it to the active file without opening any modal.
-   */
-  async writeProviderDataToActiveFile(date) {
-    this.app.workspace.getActiveFile();
-    const loadingNotice = new obsidian.Notice(this.i18n.notices.loadingHealthData, 0);
-    const result = await this.fetchHealthData(date);
-    loadingNotice.hide();
-    return result.data;
-  }
-  // from provider in background, fill/override modal when data arrives.
-  async addHealthDataForDateToActiveFile(date) {
-    logger.debug("\u{1F504} addHealthDataForDateToActiveFile called for date:", date);
-    const file = this.app.workspace.getActiveFile();
-    if (!file) {
-      new obsidian.Notice(this.i18n.notices.noActiveFile);
-      return;
-    }
-    const loadingNotice = new obsidian.Notice(this.i18n.notices.loadingHealthData, 0);
-    const result = await this.fetchHealthData(date);
-    loadingNotice.hide();
-    await this.addDataToFile(file, date, result.data ?? {});
-    if (result.successfulProviders.length > 0) {
-      const names = result.successfulProviders.map((key) => this.getProviderDisplayName(key)).join(", ");
-      new obsidian.Notice(this.i18n.notices.addedToFileFromProviders(names));
-      return;
-    }
-    new obsidian.Notice(this.i18n.notices.fetchError);
-  }
-  async resolveDateFromFile(file) {
-    try {
-      const content = await this.app.vault.read(file);
-      if (content.startsWith("---\n")) {
-        const endIdx = content.indexOf("\n---", 4);
-        if (endIdx !== -1) {
-          const fmText = content.slice(4, endIdx);
-          const fmMatch = fmText.match(/(?:^|\n)\s*date:\s*(\d{4}-\d{2}-\d{2})\s*(?:\n|$)/);
-          if (fmMatch?.[1]) {
-            const d = new Date(fmMatch[1]);
-            if (!isNaN(d.getTime())) return d;
-          }
-        }
-      }
-    } catch (e) {
-      logger.warn("Failed reading date from frontmatter:", e);
-    }
-    const nameMatch = String(file.basename || "").match(/^(\d{4}-\d{2}-\d{2})$/);
-    if (nameMatch?.[1]) {
-      const d = new Date(nameMatch[1]);
-      if (!isNaN(d.getTime())) return d;
-    }
-    return null;
-  }
-  /** Build the `values` object for Modal Form's `openForm` pre-fill option. */
-  buildModalFormValues(data) {
-    if (!data) return {};
-    const v = {};
-    if (data.steps != null) v["Pas"] = data.steps;
-    if (data.weight != null) v["Poids"] = data.weight;
-    if (data.transport_km != null) v["km"] = data.transport_km;
-    const knownSports = /* @__PURE__ */ new Set(["\u{1F3C3}", "\u{1F3CA}", "\u{1F9D7}\u200D\u2640", "\u{1F6B4}", "\u{1F3CB}\u200D\u2640", "\u2205"]);
-    const firstSport = data.sports?.find((s) => knownSports.has(s));
-    if (firstSport) v["Sport"] = firstSport;
-    return v;
-  }
-  /**
-   * Merge the Modal Form result (field names like 'Pas', 'Poids', …) with
-   * provider-only fields (sleep, HR, distances) that are not in the form.
-   */
-  mergeModalFormResult(formData, provider) {
-    const num = (v) => {
-      const n = parseFloat(v);
-      return isNaN(n) ? null : n;
-    };
-    const sport = formData["Sport"];
-    const sports = sport && sport !== "\u2205" ? [sport] : provider?.sports ?? [];
-    return {
-      steps: formData["Pas"] != null ? Math.round(Number(formData["Pas"])) : provider?.steps ?? null,
-      weight: formData["Poids"] != null ? num(formData["Poids"]) : provider?.weight ?? null,
-      transport_km: formData["km"] != null ? num(formData["km"]) : provider?.transport_km ?? null,
-      sports,
-      // Provider-only fields (not in the Modal Form)
-      sleep: provider?.sleep ?? null,
-      sleepScore: provider?.sleepScore ?? null,
-      averageHeartRate: provider?.averageHeartRate ?? null,
-      runningDistance_km: provider?.runningDistance_km ?? null,
-      SwimmingDistance_km: provider?.SwimmingDistance_km ?? null,
-      // backward-compat stubs
-      didRunning: false,
-      didSwimming: false,
-      didCycling: false,
-      cyclingDistance_km: null,
-      otherActivities: false
-    };
-  }
-  // Start provider fetch in background; returns null on error (graceful)
-  async fetchHealthData(date) {
-    const enabledProviders = this.getEnabledProviders();
-    if (enabledProviders.length === 0) {
-      return { data: null, successfulProviders: [], attemptedProviders: [] };
-    }
-    const services = [];
-    const attemptedProviders = [...enabledProviders];
-    try {
-      for (const key of enabledProviders) {
-        const credKey = this.buildProviderCredKey(key);
-        const existingService = this._healthServices.get(key);
-        const existingCredKey = this._healthServiceCredKeys.get(key);
-        if (!existingService || existingCredKey !== credKey) {
-          try {
-            const provider = this.resolveProvider(key);
-            const service = new HealthService(provider);
-            await service.init();
-            this._healthServices.set(key, service);
-            this._healthServiceCredKeys.set(key, credKey);
-            services.push({ key, service });
-          } catch (e) {
-            logger.warn(`Provider ${key} initialization failed:`, e);
-          }
-          continue;
-        }
-        services.push({ key, service: existingService });
-      }
-      if (services.length === 0) {
-        return { data: null, successfulProviders: [], attemptedProviders };
-      }
-      const successfulProviders = [];
-      const fetched = await Promise.all(
-        services.map(async ({ key, service }) => {
-          try {
-            const data = await service.getData(date);
-            successfulProviders.push(key);
-            return { key, data };
-          } catch (e) {
-            logger.warn(`Provider ${key} failed to fetch data:`, e);
-            return null;
-          }
-        })
-      );
-      return {
-        data: mergeProviderHealthData(fetched.filter((entry) => entry !== null)),
-        successfulProviders,
-        attemptedProviders
-      };
-    } catch (e) {
-      if (e.message === "InteractiveAuthRequired") {
-        return { data: null, successfulProviders: [], attemptedProviders };
-      }
-      this.clearHealthServiceCache();
-      logger.error("fetchHealthData failed:", e);
-      return { data: null, successfulProviders: [], attemptedProviders };
-    }
-  }
-  getProviderDisplayName(key) {
-    if (key === "garmin") return this.i18n.settings.providerGarminName;
-    if (key === "strava") return this.i18n.settings.providerStravaName;
-    return this.i18n.settings.providerGoogleName;
-  }
-  clearHealthServiceCache() {
-    this._healthServices.clear();
-    this._healthServiceCredKeys.clear();
-  }
-  renderAuthHtml(title, message) {
-    return `<html><body><h2>${title}</h2><p>${message}</p></body></html>`;
-  }
-  invalidateProviderCache() {
-    this.clearHealthServiceCache();
-  }
-  getEnabledProviders() {
-    if (Array.isArray(this.settings.enabledProviders)) {
-      return this.settings.enabledProviders.map((p) => String(p).toLowerCase()).filter((p) => p === "garmin" || p === "strava" || p === "google");
-    }
-    const legacy = String(this.settings.provider || "garmin").toLowerCase();
-    if (legacy === "strava") return ["strava"];
-    if (legacy === "google") return ["google"];
-    return ["garmin"];
-  }
-  buildProviderCredKey(key) {
-    if (key === "strava") {
-      return [
-        key,
-        this.settings.stravaClientId || "",
-        this.getSecret("stravaClientSecret"),
-        this.getSecret("stravaAccessToken"),
-        this.getSecret("stravaRefreshToken"),
-        String(this.settings.stravaExpiresAt || 0)
-      ].join(":");
-    }
-    if (key === "google") {
-      return [
-        key,
-        this.settings.googleClientId || "",
-        this.getSecret("googleClientSecret"),
-        this.getSecret("googleAccessToken"),
-        this.getSecret("googleRefreshToken"),
-        String(this.settings.googleExpiresAt || 0)
-      ].join(":");
-    }
-    return [key, this.getSecret("garminUsername"), this.getSecret("garminPassword")].join(":");
-  }
-  // Resolve a provider by key
-  resolveProvider(key) {
+function createProviderFactory(deps) {
+  return (key) => {
     switch (key) {
       case "google": {
         const tokens = {
-          accessToken: this.getSecret("googleAccessToken"),
-          refreshToken: this.getSecret("googleRefreshToken"),
-          expiresAt: this.settings.googleExpiresAt || 0
+          accessToken: deps.getSecret("googleAccessToken"),
+          refreshToken: deps.getSecret("googleRefreshToken"),
+          expiresAt: deps.settings.googleExpiresAt || 0
         };
         return new GoogleHealthProvider(
-          this.settings.googleClientId || "",
-          this.getSecret("googleClientSecret"),
+          deps.settings.googleClientId || "",
+          deps.getSecret("googleClientSecret"),
           tokens,
           async (updated) => {
-            this.setSecret("googleAccessToken", updated.accessToken);
-            this.setSecret("googleRefreshToken", updated.refreshToken);
-            this.settings.googleExpiresAt = updated.expiresAt;
-            await this.saveSettings();
+            deps.setSecret("googleAccessToken", updated.accessToken);
+            deps.setSecret("googleRefreshToken", updated.refreshToken);
+            deps.settings.googleExpiresAt = updated.expiresAt;
+            await deps.saveSettings();
           }
         );
       }
       case "strava": {
         const tokens = {
-          accessToken: this.getSecret("stravaAccessToken"),
-          refreshToken: this.getSecret("stravaRefreshToken"),
-          expiresAt: this.settings.stravaExpiresAt || 0
+          accessToken: deps.getSecret("stravaAccessToken"),
+          refreshToken: deps.getSecret("stravaRefreshToken"),
+          expiresAt: deps.settings.stravaExpiresAt || 0
         };
         return new StravaProvider(
-          this.settings.stravaClientId || "",
-          this.getSecret("stravaClientSecret"),
+          deps.settings.stravaClientId || "",
+          deps.getSecret("stravaClientSecret"),
           tokens,
           async (updated) => {
-            this.setSecret("stravaAccessToken", updated.accessToken);
-            this.setSecret("stravaRefreshToken", updated.refreshToken);
-            this.settings.stravaExpiresAt = updated.expiresAt;
-            await this.saveSettings();
+            deps.setSecret("stravaAccessToken", updated.accessToken);
+            deps.setSecret("stravaRefreshToken", updated.refreshToken);
+            deps.settings.stravaExpiresAt = updated.expiresAt;
+            await deps.saveSettings();
           }
         );
       }
       case "garmin":
       default:
-        return new GarminProvider(this.getSecret("garminUsername"), this.getSecret("garminPassword"));
+        return new GarminProvider(deps.getSecret("garminUsername"), deps.getSecret("garminPassword"));
     }
-  }
-  /** Open Strava OAuth flow in the browser and exchange the code for tokens */
-  async connectStrava() {
-    const clientId = this.settings.stravaClientId?.trim();
-    const clientSecret = this.getSecret("stravaClientSecret").trim();
-    if (!clientId || !clientSecret) {
-      new obsidian.Notice(this.i18n.notices.stravaMissingCredentials);
-      return;
-    }
-    let server;
-    let resolveCode;
-    let rejectCode;
-    const codePromise = new Promise((res, rej) => {
-      resolveCode = res;
-      rejectCode = rej;
-    });
-    try {
-      const http = window.require("http");
-      server = http.createServer((req, res) => {
-        try {
-          const url = new URL(`http://localhost${req.url}`);
-          const code2 = url.searchParams.get("code");
-          const error = url.searchParams.get("error");
-          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-          if (code2) {
-            res.end(this.renderAuthHtml(`\u2705 ${this.i18n.auth.successTitle("Strava")}`, this.i18n.auth.successCloseTab));
-            resolveCode(code2);
-          } else {
-            res.end(this.renderAuthHtml(`\u274C ${this.i18n.auth.errorTitle}`, error ?? this.i18n.auth.deniedDefault));
-            rejectCode(new Error(`Strava OAuth denied: ${error ?? "unknown"}`));
-          }
-        } catch (e) {
-          res.end(this.i18n.auth.internalError);
-          rejectCode(e);
-        }
-      });
-      await new Promise((res, rej) => server.listen(0, "127.0.0.1", (err) => err ? rej(err) : res()));
-      const port = server.address().port;
-      const redirectUri = `http://localhost:${port}`;
-      const authUrl = `https://www.strava.com/oauth/authorize?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&approval_prompt=force&scope=activity%3Aread_all`;
-      const { shell } = window.require("electron");
-      await shell.openExternal(authUrl);
-      new obsidian.Notice(this.i18n.notices.stravaAuthorizeBrowser, 6e3);
-      const timeoutHandle = setTimeout(() => rejectCode(new Error("Timeout: pas de r\xE9ponse Strava apr\xE8s 5 minutes")), 5 * 60 * 1e3);
-      const code = await codePromise;
-      clearTimeout(timeoutHandle);
-      const tokens = await StravaProvider.exchangeCode(clientId, clientSecret, code);
-      this.setSecret("stravaAccessToken", tokens.accessToken);
-      this.setSecret("stravaRefreshToken", tokens.refreshToken);
-      this.settings.stravaExpiresAt = tokens.expiresAt;
-      await this.saveSettings();
-      this.clearHealthServiceCache();
-      new obsidian.Notice(this.i18n.notices.stravaConnected);
-    } catch (e) {
-      logger.error("Strava connect error:", e);
-      new obsidian.Notice(this.i18n.notices.stravaError(e.message));
-    } finally {
-      if (server) server.close();
-    }
-  }
-  /** Open Google OAuth flow and exchange code for Google Health tokens */
-  async connectGoogleHealth() {
-    const clientId = String(this.settings.googleClientId || "").trim();
-    const clientSecret = this.getSecret("googleClientSecret").trim();
-    const redirectUri = String(GOOGLE_OAUTH_CONFIG.redirectUri ).trim();
-    if (!clientId || !clientSecret || !redirectUri) {
-      new obsidian.Notice(this.i18n.notices.googleMissingCredentials);
-      return;
-    }
-    let redirectUrl;
-    try {
-      redirectUrl = new URL(redirectUri);
-    } catch {
-      new obsidian.Notice(this.i18n.notices.googleError("redirect_uri invalide dans src/config/oauth.ts"));
-      return;
-    }
-    const listenHost = redirectUrl.hostname;
-    const listenPort = Number(redirectUrl.port || (redirectUrl.protocol === "https:" ? 443 : 80));
-    const callbackPath = redirectUrl.pathname || "/";
-    let server;
-    let resolveCode;
-    let rejectCode;
-    const codePromise = new Promise((res, rej) => {
-      resolveCode = res;
-      rejectCode = rej;
-    });
-    try {
-      const http = window.require("http");
-      server = http.createServer((req, res) => {
-        try {
-          const url = new URL(req.url, redirectUrl.origin);
-          if (url.pathname !== callbackPath) {
-            res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
-            res.end("Not Found");
-            return;
-          }
-          const code2 = url.searchParams.get("code");
-          const error = url.searchParams.get("error");
-          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-          if (code2) {
-            res.end(this.renderAuthHtml(this.i18n.auth.successTitle("Google Health"), this.i18n.auth.successCloseTab));
-            resolveCode(code2);
-          } else {
-            res.end(this.renderAuthHtml(this.i18n.auth.errorTitle, error ?? this.i18n.auth.deniedDefault));
-            rejectCode(new Error(`Google OAuth denied: ${error ?? "unknown"}`));
-          }
-        } catch (e) {
-          res.end(this.i18n.auth.internalError);
-          rejectCode(e);
-        }
-      });
-      await new Promise((res, rej) => server.listen(listenPort, listenHost, (err) => err ? rej(err) : res()));
-      const scopes = [
-        "https://www.googleapis.com/auth/fitness.activity.read",
-        "https://www.googleapis.com/auth/fitness.body.read",
-        "https://www.googleapis.com/auth/fitness.heart_rate.read",
-        "https://www.googleapis.com/auth/fitness.sleep.read"
-      ].join(" ");
-      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&access_type=offline&prompt=consent&scope=${encodeURIComponent(scopes)}`;
-      const { shell } = window.require("electron");
-      await shell.openExternal(authUrl);
-      new obsidian.Notice(this.i18n.notices.googleAuthorizeBrowser, 6e3);
-      const timeoutHandle = setTimeout(() => rejectCode(new Error("Timeout: pas de r\xE9ponse Google apr\xE8s 5 minutes")), 5 * 60 * 1e3);
-      const code = await codePromise;
-      clearTimeout(timeoutHandle);
-      const tokens = await GoogleHealthProvider.exchangeCode(clientId, clientSecret, code, redirectUri);
-      this.setSecret("googleAccessToken", tokens.accessToken);
-      this.setSecret("googleRefreshToken", tokens.refreshToken);
-      this.settings.googleExpiresAt = tokens.expiresAt;
-      await this.saveSettings();
-      this.clearHealthServiceCache();
-      new obsidian.Notice(this.i18n.notices.googleConnected);
-    } catch (e) {
-      logger.error("Google Health connect error:", e);
-      new obsidian.Notice(this.i18n.notices.googleError(e.message));
-    } finally {
-      if (server) server.close();
-    }
-  }
-  // Write health data into a specific file's frontmatter
-  async addDataToFile(file, date, data) {
-    const fileManager = this.app.fileManager;
-    await fileManager.processFrontMatter(file, (frontmatter) => {
-      frontmatter["date"] = date.toISOString().slice(0, 10);
-      const set = (key, value) => {
-        if (value !== void 0 && value !== null) frontmatter[key] = value;
-      };
-      const toSportList = (value) => {
-        if (Array.isArray(value)) return value.map((v) => String(v)).filter(Boolean);
-        if (typeof value === "string") return value.split(/[\s,]+/).map((v) => v.trim()).filter(Boolean);
-        return [];
-      };
-      set("steps", data.steps);
-      set("sleep", data.sleep);
-      set("sleepScore", data.sleepScore);
-      set("weight", data.weight);
-      set("averageHeartRate", data.averageHeartRate);
-      set("hrv", data.hrv);
-      set("stress", data.stress);
-      set("bodyBattery", data.bodyBattery);
-      set("spO2", data.spO2);
-      if (data.sports && data.sports.length > 0) {
-        const merged = [.../* @__PURE__ */ new Set([
-          ...toSportList(frontmatter["sport"]),
-          ...toSportList(frontmatter["sports"]),
-          ...data.sports.map((s) => String(s)).filter(Boolean)
-        ])];
-        frontmatter["sport"] = merged;
-      }
-      set("runningDistance_km", data.runningDistance_km);
-      set("SwimmingDistance_km", data.SwimmingDistance_km);
-      set("transport_km", data.transport_km);
-    });
-  }
-  // Legacy wrapper kept for any external callers
-  async addDataToActiveFile(date, data) {
-    const file = this.app.workspace.getActiveFile();
-    if (!file) {
-      new obsidian.Notice(this.i18n.notices.noActiveFile);
-      return;
-    }
-    await this.addDataToFile(file, date, data);
-  }
-  // Merge new frontmatter keys with existing ones, updating values if keys exist
-  mergeFrontmatterKeys(existingFm, newFrontmatter) {
-    const keysToUpdate = [
-      "date",
-      "steps",
-      "sleep",
-      "sleepScore",
-      "weight",
-      "averageHeartRate",
-      "hrv",
-      "stress",
-      "bodyBattery",
-      "spO2",
-      "didRunning",
-      "runningDistance_km",
-      "didSwimming",
-      "SwimmingDistance_km",
-      "didCycling",
-      "cyclingDistance_km",
-      "transport_km",
-      "otherActivities"
-    ];
-    const newKeys = /* @__PURE__ */ new Map();
-    newFrontmatter.split("\n").forEach((line) => {
-      const match = line.match(/^([^:]+):\s*(.*)$/);
-      if (match) {
-        newKeys.set(match[1], match[2]);
-      }
-    });
-    let updatedFm = existingFm;
-    keysToUpdate.forEach((key) => {
-      if (newKeys.has(key)) {
-        const newValue = newKeys.get(key);
-        const keyPattern = new RegExp(`^${key}:.*$`, "m");
-        if (keyPattern.test(updatedFm)) {
-          updatedFm = updatedFm.replace(keyPattern, `${key}: ${newValue}`);
-        } else {
-          updatedFm = updatedFm.trim() + `
-${key}: ${newValue}
-`;
-        }
-      }
-    });
-    return updatedFm.trim() + "\n";
-  }
-  async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-    const migrated = this.migrateLegacySecretsFromSettings();
-    if (!this.settings.googleClientId && String("").trim()) {
-      this.settings.googleClientId = String("").trim();
-    }
-    if (!this.getSecret("googleClientSecret") && String("").trim()) {
-      this.setSecret("googleClientSecret", String("").trim());
-    }
-    if (!Array.isArray(this.settings.enabledProviders)) {
-      const legacy = String(this.settings.provider || "garmin").toLowerCase();
-      if (legacy === "strava") this.settings.enabledProviders = ["strava"];
-      else if (legacy === "google") this.settings.enabledProviders = ["google"];
-      else this.settings.enabledProviders = ["garmin"];
-    }
-    this.sanitizeSettingsForPersist();
-    if (migrated) {
-      await this.saveSettings();
-    }
-  }
-  async saveSettings() {
-    this.sanitizeSettingsForPersist();
-    await this.saveData(this.settings);
-  }
-  // ── Date-range prompt ──────────────────────────────────────────────────────
-  promptForDateRange() {
-    const activeFile = this.app.workspace.getActiveFile();
-    const defaultFolder = activeFile?.parent?.path || this.settings.vaultFolder;
-    return new Promise((resolve) => {
-      new DateRangeModal(this.app, this.i18n, defaultFolder, resolve).open();
-    });
-  }
-  // ── Batch note creation ────────────────────────────────────────────────────
-  async batchCreateNotes(startDate, endDate, folder) {
-    const dates = [];
-    const cur = new Date(startDate);
-    cur.setHours(12, 0, 0, 0);
-    const end = new Date(endDate);
-    end.setHours(12, 0, 0, 0);
-    while (cur <= end) {
-      dates.push(new Date(cur));
-      cur.setDate(cur.getDate() + 1);
-    }
-    if (dates.length === 0) {
-      new obsidian.Notice(this.i18n.notices.batchInvalidRange);
-      return;
-    }
-    if (dates.length > 90) {
-      new obsidian.Notice(this.i18n.notices.batchRangeTooLong(dates.length));
-      return;
-    }
-    const targetFolder = folder.trim() || this.settings.vaultFolder;
-    try {
-      const existing = this.app.vault.getAbstractFileByPath(targetFolder);
-      if (!existing) await this.app.vault.createFolder(targetFolder);
-    } catch (e) {
-    }
-    const notice = new obsidian.Notice(this.i18n.notices.batchCreating(dates.length), 0);
-    let created = 0;
-    let skipped = 0;
-    let errors = 0;
-    for (const date of dates) {
-      const dateStr = date.toISOString().slice(0, 10);
-      const filePath = `${targetFolder}/${dateStr}.md`;
-      if (this.app.vault.getAbstractFileByPath(filePath)) {
-        skipped++;
-        continue;
-      }
-      try {
-        let data = null;
-        try {
-          data = (await this.fetchHealthData(date)).data;
-        } catch (e) {
-          logger.warn(`Fetch failed for ${dateStr}:`, e);
-        }
-        const content = this.buildNoteContent(date, data);
-        await this.app.vault.create(filePath, content);
-        created++;
-        notice.setMessage(this.i18n.notices.batchProgress(created, dates.length));
-      } catch (e) {
-        logger.error(`Failed to create note for ${dateStr}:`, e);
-        errors++;
-      }
-      await new Promise((r) => setTimeout(r, 300));
-    }
-    notice.hide();
-    const parts = [this.i18n.notices.batchCreated(created)];
-    if (skipped > 0) parts.push(this.i18n.notices.batchSkipped(skipped));
-    if (errors > 0) parts.push(this.i18n.notices.batchErrors(errors));
-    new obsidian.Notice(parts.join(", "), 5e3);
-  }
-  /** Build a markdown note with YAML frontmatter for a given date + health data */
-  buildNoteContent(date, data) {
-    const dateStr = date.toISOString().slice(0, 10);
-    const yv = (v) => v !== null && v !== void 0 ? String(v) : '""';
-    const sportYaml = data?.sports && data.sports.length > 0 ? "\n  - " + data.sports.join("\n  - ") : " []";
-    return [
-      "---",
-      "\xE9tiquettes:",
-      "  - mHealth",
-      "  - tracker",
-      `date: "${dateStr}"`,
-      `weight: ${yv(data?.weight)}`,
-      `steps: ${yv(data?.steps)}`,
-      `sports:${sportYaml}`,
-      `sleep: ${yv(data?.sleep)}`,
-      `sleepScore: ${yv(data?.sleepScore)}`,
-      `averageHeartRate: ${yv(data?.averageHeartRate)}`,
-      `hrv: ${yv(data?.hrv)}`,
-      `stress: ${yv(data?.stress)}`,
-      `bodyBattery: ${yv(data?.bodyBattery)}`,
-      `spO2: ${yv(data?.spO2)}`,
-      `transport_km: ${yv(data?.transport_km)}`,
-      'alcool: ""',
-      'fruits&vegetables: ""',
-      'mood: ""',
-      'reading: ""',
-      'transport: ""',
-      "km: 0",
-      "co2: 0",
-      "---",
-      "",
-      "# \u{1F4AD} R\xEAves",
-      "- ",
-      "# \u{1F9E0}  Faits marquants ",
-      "- ",
-      "# \u{1F60E} Pens\xE9es positives ",
-      "1. Pens\xE9e 1",
-      "2. "
-    ].join("\n");
-  }
+  };
 }
+
+async function resolveDateFromNote(deps) {
+  try {
+    const content = await deps.readContent();
+    if (content.startsWith("---\n")) {
+      const endIdx = content.indexOf("\n---", 4);
+      if (endIdx !== -1) {
+        const fmText = content.slice(4, endIdx);
+        const fmMatch = fmText.match(/(?:^|\n)\s*date:\s*(\d{4}-\d{2}-\d{2})\s*(?:\n|$)/);
+        if (fmMatch?.[1]) {
+          const d = new Date(fmMatch[1]);
+          if (!isNaN(d.getTime())) return d;
+        }
+      }
+    }
+  } catch (e) {
+    deps.warn?.("Failed reading date from frontmatter:", e);
+  }
+  const nameMatch = deps.basename.match(/^(\d{4}-\d{2}-\d{2})$/);
+  if (nameMatch?.[1]) {
+    const d = new Date(nameMatch[1]);
+    if (!isNaN(d.getTime())) return d;
+  }
+  return null;
+}
+
 class FolderSuggestModal extends obsidian.FuzzySuggestModal {
   constructor(app, onChoose) {
     super(app);
@@ -39368,7 +38926,9 @@ class DateRangeModal extends obsidian.Modal {
     const folderCell = folderRow.createDiv({ attr: { style: "display:flex;gap:0.4rem;align-items:center;flex:1;" } });
     const folderDisplay = folderCell.createEl("span", {
       cls: "health-entry-folder-display",
-      attr: { style: "flex:1;padding:0.3rem 0.5rem;border:1px solid var(--background-modifier-border);border-radius:4px;background:var(--background-primary);color:var(--text-normal);font-size:0.9em;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" }
+      attr: {
+        style: "flex:1;padding:0.3rem 0.5rem;border:1px solid var(--background-modifier-border);border-radius:4px;background:var(--background-primary);color:var(--text-normal);font-size:0.9em;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+      }
     });
     folderDisplay.setText(selectedFolder || "/");
     const browseBtn = folderCell.createEl("button", { text: `\u{1F4C2} ${this.i18n.modal.browseFolder}`, attr: { style: "flex-shrink:0;" } });
@@ -39414,6 +38974,7 @@ class DateRangeModal extends obsidian.Modal {
     this.contentEl.empty();
   }
 }
+
 class HealthConnectorSettingTab extends obsidian.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
@@ -39501,7 +39062,7 @@ class HealthConnectorSettingTab extends obsidian.PluginSettingTab {
             });
             inputEl.parentElement?.appendChild(btn);
           }
-        } catch (e) {
+        } catch {
         }
         return text;
       });
@@ -39586,6 +39147,496 @@ class HealthConnectorSettingTab extends obsidian.PluginSettingTab {
         }
       });
     });
+  }
+}
+
+function renderAuthHtml(title, message) {
+  return `<html><body><h2>${title}</h2><p>${message}</p></body></html>`;
+}
+async function connectStravaOAuth(deps) {
+  let server;
+  let resolveCode;
+  let rejectCode;
+  const codePromise = new Promise((res, rej) => {
+    resolveCode = res;
+    rejectCode = rej;
+  });
+  try {
+    const http = window.require("http");
+    server = http.createServer((req, res) => {
+      try {
+        const url = new URL(`http://localhost${req.url}`);
+        const code2 = url.searchParams.get("code");
+        const error = url.searchParams.get("error");
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        if (code2) {
+          res.end(renderAuthHtml(`\u2705 ${deps.i18n.auth.successTitle("Strava")}`, deps.i18n.auth.successCloseTab));
+          resolveCode(code2);
+        } else {
+          res.end(renderAuthHtml(`\u274C ${deps.i18n.auth.errorTitle}`, error ?? deps.i18n.auth.deniedDefault));
+          rejectCode(new Error(`Strava OAuth denied: ${error ?? "unknown"}`));
+        }
+      } catch (e) {
+        res.end(deps.i18n.auth.internalError);
+        rejectCode(e);
+      }
+    });
+    await new Promise((res, rej) => server.listen(0, "127.0.0.1", (err) => err ? rej(err) : res()));
+    const port = server.address().port;
+    const redirectUri = `http://localhost:${port}`;
+    const authUrl = `https://www.strava.com/oauth/authorize?client_id=${encodeURIComponent(deps.clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&approval_prompt=force&scope=activity%3Aread_all`;
+    const { shell } = window.require("electron");
+    await shell.openExternal(authUrl);
+    new obsidian.Notice(deps.i18n.notices.stravaAuthorizeBrowser, 6e3);
+    const timeoutHandle = setTimeout(() => rejectCode(new Error("Timeout: pas de r\xE9ponse Strava apr\xE8s 5 minutes")), 5 * 60 * 1e3);
+    const code = await codePromise;
+    clearTimeout(timeoutHandle);
+    const tokens = await StravaProvider.exchangeCode(deps.clientId, deps.clientSecret, code);
+    await deps.onTokens(tokens);
+    new obsidian.Notice(deps.i18n.notices.stravaConnected);
+  } catch (e) {
+    deps.logger.error("Strava connect error:", e);
+    new obsidian.Notice(deps.i18n.notices.stravaError(e.message));
+  } finally {
+    if (server) server.close();
+  }
+}
+async function connectGoogleOAuth(deps) {
+  let redirectUrl;
+  try {
+    redirectUrl = new URL(deps.redirectUri);
+  } catch {
+    new obsidian.Notice(deps.i18n.notices.googleError("redirect_uri invalide dans src/config/oauth.ts"));
+    return;
+  }
+  const listenHost = redirectUrl.hostname;
+  const listenPort = Number(redirectUrl.port || (redirectUrl.protocol === "https:" ? 443 : 80));
+  const callbackPath = redirectUrl.pathname || "/";
+  let server;
+  let resolveCode;
+  let rejectCode;
+  const codePromise = new Promise((res, rej) => {
+    resolveCode = res;
+    rejectCode = rej;
+  });
+  try {
+    const http = window.require("http");
+    server = http.createServer((req, res) => {
+      try {
+        const url = new URL(req.url, redirectUrl.origin);
+        if (url.pathname !== callbackPath) {
+          res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+          res.end("Not Found");
+          return;
+        }
+        const code2 = url.searchParams.get("code");
+        const error = url.searchParams.get("error");
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        if (code2) {
+          res.end(renderAuthHtml(deps.i18n.auth.successTitle("Google Health"), deps.i18n.auth.successCloseTab));
+          resolveCode(code2);
+        } else {
+          res.end(renderAuthHtml(deps.i18n.auth.errorTitle, error ?? deps.i18n.auth.deniedDefault));
+          rejectCode(new Error(`Google OAuth denied: ${error ?? "unknown"}`));
+        }
+      } catch (e) {
+        res.end(deps.i18n.auth.internalError);
+        rejectCode(e);
+      }
+    });
+    await new Promise((res, rej) => server.listen(listenPort, listenHost, (err) => err ? rej(err) : res()));
+    const scopes = [
+      "https://www.googleapis.com/auth/fitness.activity.read",
+      "https://www.googleapis.com/auth/fitness.body.read",
+      "https://www.googleapis.com/auth/fitness.heart_rate.read",
+      "https://www.googleapis.com/auth/fitness.sleep.read"
+    ].join(" ");
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(deps.clientId)}&redirect_uri=${encodeURIComponent(deps.redirectUri)}&response_type=code&access_type=offline&prompt=consent&scope=${encodeURIComponent(scopes)}`;
+    const { shell } = window.require("electron");
+    await shell.openExternal(authUrl);
+    new obsidian.Notice(deps.i18n.notices.googleAuthorizeBrowser, 6e3);
+    const timeoutHandle = setTimeout(() => rejectCode(new Error("Timeout: pas de r\xE9ponse Google apr\xE8s 5 minutes")), 5 * 60 * 1e3);
+    const code = await codePromise;
+    clearTimeout(timeoutHandle);
+    const tokens = await GoogleHealthProvider.exchangeCode(deps.clientId, deps.clientSecret, code, deps.redirectUri);
+    await deps.onTokens(tokens);
+    new obsidian.Notice(deps.i18n.notices.googleConnected);
+  } catch (e) {
+    deps.logger.error("Google Health connect error:", e);
+    new obsidian.Notice(deps.i18n.notices.googleError(e.message));
+  } finally {
+    if (server) server.close();
+  }
+}
+
+class HealthConnectorPlugin extends obsidian.Plugin {
+  constructor() {
+    super(...arguments);
+    this.i18n = getLocale();
+  }
+  getSecret(secret) {
+    return this._secretSettings.get(secret);
+  }
+  setSecret(secret, value) {
+    this._secretSettings.set(secret, value);
+  }
+  async onload() {
+    this._secretSettings = new SecretSettingsService(this.app.secretStorage, logger);
+    await this.loadSettings();
+    this._writeHealthFrontmatter = new WriteHealthFrontmatterUseCase(
+      new ObsidianFrontmatterPort(this.app.fileManager)
+    );
+    this._providerFetch = new ProviderFetchOrchestrator({
+      getEnabledProviders: () => this.getEnabledProviders(),
+      buildProviderCredKey: (key) => this.buildProviderCredKey(key),
+      resolveProvider: createProviderFactory({
+        settings: this.settings,
+        getSecret: (secret) => this.getSecret(secret),
+        setSecret: (secret, value) => this.setSecret(secret, value),
+        saveSettings: () => this.saveSettings()
+      }),
+      mergeProviderHealthData: (entries) => mergeProviderHealthData(entries),
+      logger
+    });
+    this.i18n = getLocale(this.app.vault?.adapter?.basePath ? this.app.language : void 0);
+    this.api = {
+      syncToday: async () => {
+        await this.writeProviderDataToActiveFile(/* @__PURE__ */ new Date());
+      },
+      syncDate: async (date) => {
+        await this.writeProviderDataToActiveFile(date);
+      }
+    };
+    try {
+      globalThis.__HealthConnectorPluginInstance = this;
+      const existing = await this.loadData() || {};
+      const legacyTokens = existing.tokens ?? null;
+      const storedTokens = this._secretSettings.getGarminTokenCache();
+      const initialTokens = storedTokens ?? legacyTokens;
+      if (!storedTokens && legacyTokens) {
+        this._secretSettings.setGarminTokenCache(legacyTokens);
+      }
+      globalThis.__GarminTokenCache = initialTokens;
+      globalThis.__GarminTokenStore = {
+        syncLoad: () => {
+          return globalThis.__GarminTokenCache || null;
+        },
+        syncSave: (tokens) => {
+          globalThis.__GarminTokenCache = tokens;
+          setTimeout(async () => {
+            try {
+              this._secretSettings.setGarminTokenCache(tokens);
+              logger.info("Tokens persisted via secret storage");
+            } catch (e) {
+              logger.warn("Failed to persist tokens via secret storage", e);
+            }
+          }, 0);
+        },
+        syncClear: () => {
+          globalThis.__GarminTokenCache = null;
+          setTimeout(async () => {
+            try {
+              this._secretSettings.setGarminTokenCache(null);
+              logger.info("Tokens cleared via secret storage");
+            } catch (e) {
+              logger.warn("Failed to clear tokens via secret storage", e);
+            }
+          }, 0);
+        }
+      };
+    } catch (e) {
+      logger.warn("Failed to initialize token store", e);
+    }
+    this.addCommand({
+      id: "health-add-today-to-frontmatter",
+      name: this.i18n.commands.addTodayToFrontmatter,
+      callback: async () => {
+        await this.addHealthDataForDateToActiveFile(/* @__PURE__ */ new Date());
+      }
+    });
+    this.addCommand({
+      id: "health-add-date-to-frontmatter",
+      name: this.i18n.commands.addDateToFrontmatter,
+      callback: async () => {
+        const file = this.app.workspace.getActiveFile();
+        if (!file) {
+          new obsidian.Notice(this.i18n.notices.noActiveFile);
+          return;
+        }
+        const d = await this.resolveDateFromFile(file);
+        if (!d) {
+          new obsidian.Notice(this.i18n.notices.dateNotFoundInFile);
+          return;
+        }
+        await this.addHealthDataForDateToActiveFile(d);
+      }
+    });
+    this.addSettingTab(new HealthConnectorSettingTab(this.app, this));
+    this.addCommand({
+      id: "health-batch-create-notes",
+      name: this.i18n.commands.batchCreateNotes,
+      callback: async () => {
+        const params = await this.promptForDateRange();
+        if (!params) return;
+        await this.batchCreateNotes(params.startDate, params.endDate, params.folder);
+      }
+    });
+  }
+  async onunload() {
+  }
+  // Health data access handled by `HealthService` with provider pattern
+  // The method to create standalone notes has been removed per configuration.
+  // Retrieve health data for a date: open data-entry modal immediately, fetch
+  /**
+   * Silent write — used by the public API (Templater templates, etc.).
+   * Fetches provider data and writes it to the active file without opening any modal.
+   */
+  async writeProviderDataToActiveFile(date) {
+    this.app.workspace.getActiveFile();
+    const loadingNotice = new obsidian.Notice(this.i18n.notices.loadingHealthData, 0);
+    const result = await this.fetchHealthData(date);
+    loadingNotice.hide();
+    return result.data;
+  }
+  // from provider in background, fill/override modal when data arrives.
+  async addHealthDataForDateToActiveFile(date) {
+    logger.debug("\u{1F504} addHealthDataForDateToActiveFile called for date:", date);
+    const file = this.app.workspace.getActiveFile();
+    if (!file) {
+      new obsidian.Notice(this.i18n.notices.noActiveFile);
+      return;
+    }
+    const loadingNotice = new obsidian.Notice(this.i18n.notices.loadingHealthData, 0);
+    const result = await this.fetchHealthData(date);
+    loadingNotice.hide();
+    await this.addDataToFile(file, date, result.data ?? {});
+    if (result.successfulProviders.length > 0) {
+      const names = result.successfulProviders.map((key) => this.getProviderDisplayName(key)).join(", ");
+      new obsidian.Notice(this.i18n.notices.addedToFileFromProviders(names));
+      return;
+    }
+    new obsidian.Notice(this.i18n.notices.fetchError);
+  }
+  async resolveDateFromFile(file) {
+    return resolveDateFromNote({
+      basename: String(file.basename || ""),
+      readContent: async () => this.app.vault.read(file),
+      warn: (message, error) => logger.warn(message, error)
+    });
+  }
+  /** Build the `values` object for Modal Form's `openForm` pre-fill option. */
+  buildModalFormValues(data) {
+    if (!data) return {};
+    const v = {};
+    if (data.steps != null) v["Pas"] = data.steps;
+    if (data.weight != null) v["Poids"] = data.weight;
+    if (data.transport_km != null) v["km"] = data.transport_km;
+    const knownSports = /* @__PURE__ */ new Set(["\u{1F3C3}", "\u{1F3CA}", "\u{1F9D7}\u200D\u2640", "\u{1F6B4}", "\u{1F3CB}\u200D\u2640", "\u2205"]);
+    const firstSport = data.sports?.find((s) => knownSports.has(s));
+    if (firstSport) v["Sport"] = firstSport;
+    return v;
+  }
+  /**
+   * Merge the Modal Form result (field names like 'Pas', 'Poids', …) with
+   * provider-only fields (sleep, HR, distances) that are not in the form.
+   */
+  mergeModalFormResult(formData, provider) {
+    const num = (v) => {
+      const n = parseFloat(v);
+      return isNaN(n) ? null : n;
+    };
+    const sport = formData["Sport"];
+    const sports = sport && sport !== "\u2205" ? [sport] : provider?.sports ?? [];
+    return {
+      steps: formData["Pas"] != null ? Math.round(Number(formData["Pas"])) : provider?.steps ?? null,
+      weight: formData["Poids"] != null ? num(formData["Poids"]) : provider?.weight ?? null,
+      transport_km: formData["km"] != null ? num(formData["km"]) : provider?.transport_km ?? null,
+      sports,
+      // Provider-only fields (not in the Modal Form)
+      sleep: provider?.sleep ?? null,
+      sleepScore: provider?.sleepScore ?? null,
+      averageHeartRate: provider?.averageHeartRate ?? null,
+      runningDistance_km: provider?.runningDistance_km ?? null,
+      SwimmingDistance_km: provider?.SwimmingDistance_km ?? null,
+      // backward-compat stubs
+      didRunning: false,
+      didSwimming: false,
+      didCycling: false,
+      cyclingDistance_km: null,
+      otherActivities: false
+    };
+  }
+  // Start provider fetch in background; returns null on error (graceful)
+  async fetchHealthData(date) {
+    return this._providerFetch.fetch(date);
+  }
+  getProviderDisplayName(key) {
+    if (key === "garmin") return this.i18n.settings.providerGarminName;
+    if (key === "strava") return this.i18n.settings.providerStravaName;
+    return this.i18n.settings.providerGoogleName;
+  }
+  clearHealthServiceCache() {
+    this._providerFetch.clearCache();
+  }
+  invalidateProviderCache() {
+    this.clearHealthServiceCache();
+  }
+  getEnabledProviders() {
+    return getEnabledProviders(this.settings);
+  }
+  buildProviderCredKey(key) {
+    return buildProviderCredKey(key, this.settings, (secret) => this.getSecret(secret));
+  }
+  /** Open Strava OAuth flow in the browser and exchange the code for tokens */
+  async connectStrava() {
+    const clientId = this.settings.stravaClientId?.trim();
+    const clientSecret = this.getSecret("stravaClientSecret").trim();
+    if (!clientId || !clientSecret) {
+      new obsidian.Notice(this.i18n.notices.stravaMissingCredentials);
+      return;
+    }
+    await connectStravaOAuth({
+      clientId,
+      clientSecret,
+      i18n: this.i18n,
+      logger,
+      onTokens: async (tokens) => {
+        this.setSecret("stravaAccessToken", tokens.accessToken);
+        this.setSecret("stravaRefreshToken", tokens.refreshToken);
+        this.settings.stravaExpiresAt = tokens.expiresAt;
+        await this.saveSettings();
+        this.clearHealthServiceCache();
+      }
+    });
+  }
+  /** Open Google OAuth flow and exchange code for Google Health tokens */
+  async connectGoogleHealth() {
+    const clientId = String(this.settings.googleClientId || "").trim();
+    const clientSecret = this.getSecret("googleClientSecret").trim();
+    const redirectUri = String(GOOGLE_OAUTH_CONFIG.redirectUri ).trim();
+    if (!clientId || !clientSecret || !redirectUri) {
+      new obsidian.Notice(this.i18n.notices.googleMissingCredentials);
+      return;
+    }
+    await connectGoogleOAuth({
+      clientId,
+      clientSecret,
+      redirectUri,
+      i18n: this.i18n,
+      logger,
+      onTokens: async (tokens) => {
+        this.setSecret("googleAccessToken", tokens.accessToken);
+        this.setSecret("googleRefreshToken", tokens.refreshToken);
+        this.settings.googleExpiresAt = tokens.expiresAt;
+        await this.saveSettings();
+        this.clearHealthServiceCache();
+      }
+    });
+  }
+  // Write health data into a specific file's frontmatter
+  async addDataToFile(file, date, data) {
+    await this._writeHealthFrontmatter.execute(file, date, data);
+  }
+  // Legacy wrapper kept for any external callers
+  async addDataToActiveFile(date, data) {
+    const file = this.app.workspace.getActiveFile();
+    if (!file) {
+      new obsidian.Notice(this.i18n.notices.noActiveFile);
+      return;
+    }
+    await this.addDataToFile(file, date, data);
+  }
+  async loadSettings() {
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    this._secretSettings.sanitizeSettingsForPersist(this.settings);
+    const migrated = this._secretSettings.migrateLegacySecretsFromSettings(this.settings);
+    if (!this.settings.googleClientId && String("").trim()) {
+      this.settings.googleClientId = String("").trim();
+    }
+    if (!this.getSecret("googleClientSecret") && String("").trim()) {
+      this.setSecret("googleClientSecret", String("").trim());
+    }
+    if (!Array.isArray(this.settings.enabledProviders)) {
+      const legacy = String(this.settings.provider || "garmin").toLowerCase();
+      if (legacy === "strava") this.settings.enabledProviders = ["strava"];
+      else if (legacy === "google") this.settings.enabledProviders = ["google"];
+      else this.settings.enabledProviders = ["garmin"];
+    }
+    this._secretSettings.sanitizeSettingsForPersist(this.settings);
+    if (migrated) {
+      await this.saveSettings();
+    }
+  }
+  async saveSettings() {
+    this._secretSettings.sanitizeSettingsForPersist(this.settings);
+    await this.saveData(this.settings);
+  }
+  // ── Date-range prompt ──────────────────────────────────────────────────────
+  promptForDateRange() {
+    const activeFile = this.app.workspace.getActiveFile();
+    const defaultFolder = activeFile?.parent?.path || this.settings.vaultFolder;
+    return new Promise((resolve) => {
+      new DateRangeModal(this.app, this.i18n, defaultFolder, resolve).open();
+    });
+  }
+  // ── Batch note creation ────────────────────────────────────────────────────
+  async batchCreateNotes(startDate, endDate, folder) {
+    const dates = [];
+    const cur = new Date(startDate);
+    cur.setHours(12, 0, 0, 0);
+    const end = new Date(endDate);
+    end.setHours(12, 0, 0, 0);
+    while (cur <= end) {
+      dates.push(new Date(cur));
+      cur.setDate(cur.getDate() + 1);
+    }
+    if (dates.length === 0) {
+      new obsidian.Notice(this.i18n.notices.batchInvalidRange);
+      return;
+    }
+    if (dates.length > 90) {
+      new obsidian.Notice(this.i18n.notices.batchRangeTooLong(dates.length));
+      return;
+    }
+    const targetFolder = folder.trim() || this.settings.vaultFolder;
+    try {
+      const existing = this.app.vault.getAbstractFileByPath(targetFolder);
+      if (!existing) await this.app.vault.createFolder(targetFolder);
+    } catch (e) {
+    }
+    const notice = new obsidian.Notice(this.i18n.notices.batchCreating(dates.length), 0);
+    let created = 0;
+    let skipped = 0;
+    let errors = 0;
+    for (const date of dates) {
+      const dateStr = date.toISOString().slice(0, 10);
+      const filePath = `${targetFolder}/${dateStr}.md`;
+      if (this.app.vault.getAbstractFileByPath(filePath)) {
+        skipped++;
+        continue;
+      }
+      try {
+        let data = null;
+        try {
+          data = (await this.fetchHealthData(date)).data;
+        } catch (e) {
+          logger.warn(`Fetch failed for ${dateStr}:`, e);
+        }
+        const content = buildHealthNoteContent(date, data);
+        await this.app.vault.create(filePath, content);
+        created++;
+        notice.setMessage(this.i18n.notices.batchProgress(created, dates.length));
+      } catch (e) {
+        logger.error(`Failed to create note for ${dateStr}:`, e);
+        errors++;
+      }
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    notice.hide();
+    const parts = [this.i18n.notices.batchCreated(created)];
+    if (skipped > 0) parts.push(this.i18n.notices.batchSkipped(skipped));
+    if (errors > 0) parts.push(this.i18n.notices.batchErrors(errors));
+    new obsidian.Notice(parts.join(", "), 5e3);
   }
 }
 

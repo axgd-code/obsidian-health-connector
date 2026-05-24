@@ -1,6 +1,6 @@
-import { logger } from '../common/Logger';
-import type { HealthData } from '../types/health';
-import type { IHealthProvider } from './IHealthProvider';
+import { logger } from '../../../shared/logging/Logger';
+import type { HealthData } from '../../../domain/health/entities/HealthData';
+import type { IHealthProvider } from '../../../domain/health/ports/IHealthProvider';
 
 let requestUrl: (config: any) => Promise<any>;
 try {

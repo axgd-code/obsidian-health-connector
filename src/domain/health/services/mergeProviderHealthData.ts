@@ -1,4 +1,4 @@
-import type { HealthData } from '../types/health';
+import type { HealthData } from '../entities/HealthData';
 
 export type HealthProviderKey = 'garmin' | 'strava' | 'google';
 

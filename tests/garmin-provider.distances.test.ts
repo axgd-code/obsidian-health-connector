@@ -1,4 +1,4 @@
-import { GarminProvider } from "../src/providers/GarminProvider";
+import { GarminProvider } from "../src/infrastructure/providers/garmin/GarminProvider";
 
 describe('GarminProvider distance extraction variations', () => {
   test('parses various distance key names and formats', async () => {

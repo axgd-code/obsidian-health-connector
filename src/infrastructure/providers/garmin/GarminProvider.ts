@@ -1,6 +1,6 @@
 import * as GarminConnectModule from 'garmin-connect-obsidian';
-import { logger } from '../common/Logger';
-import type { HealthData } from '../types/health';
+import { logger } from '../../../shared/logging/Logger';
+import type { HealthData } from '../../../domain/health/entities/HealthData';
 import type { IHealthProvider } from './IHealthProvider';
 
 const { GarminConnect } = GarminConnectModule as any;

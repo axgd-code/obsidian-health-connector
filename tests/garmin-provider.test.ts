@@ -1,4 +1,4 @@
-import { GarminProvider } from "../src/providers/GarminProvider";
+import { GarminProvider } from "../src/infrastructure/providers/garmin/GarminProvider";
 
 describe('GarminProvider', () => {
   test('getData returns mapped fields when client methods exist', async () => {

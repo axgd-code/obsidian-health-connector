@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
-import { mergeProviderHealthData, type ProviderHealthDataEntry } from '../src/common/mergeHealthData';
-import type { HealthData } from '../src/types/health';
+import { mergeProviderHealthData, type ProviderHealthDataEntry } from '../src/domain/health/services/mergeProviderHealthData';
+import type { HealthData } from '../src/domain/health/entities/HealthData';
 
 function makeHealthData(overrides: Partial<HealthData>): HealthData {
   return {

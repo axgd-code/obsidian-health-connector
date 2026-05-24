@@ -94,6 +94,7 @@ Optional shortcut for local deployment:
 OBSIDIAN_PLUGIN_DIR="/absolute/path/to/vault/.obsidian/plugins/health-connector" npm run deploy:obsidian
 ```
 
+
 ## Security
 
 - Never commit real secrets or a `.env` file that contains credentials.

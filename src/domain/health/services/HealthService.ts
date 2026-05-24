@@ -1,5 +1,5 @@
-import type { IHealthProvider } from '../providers/IHealthProvider';
-import type { HealthData } from '../types/health';
+import type { IHealthProvider } from '../ports/IHealthProvider';
+import type { HealthData } from '../entities/HealthData';
 
 export class HealthService {
   private provider: IHealthProvider;
