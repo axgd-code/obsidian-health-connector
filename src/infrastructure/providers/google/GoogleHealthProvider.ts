@@ -342,6 +342,7 @@ export class GoogleHealthProvider implements IHealthProvider {
       steps,
       weight,
       averageHeartRate,
+      vo2Max: null,
       hrv: null,
       stress: null,
       bodyBattery: null,

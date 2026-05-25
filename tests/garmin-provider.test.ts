@@ -8,11 +8,24 @@ describe('GarminProvider', () => {
       getSteps: async (_d: Date) => 2000,
       getWeight: async (_d: Date) => ({ weight: 72 }),
       getHeartRate: async (_d: Date) => ({ average: 58 }),
-      getSleep: async (_d: Date) => ({ dailySleepDTO: { sleepTimeSeconds: 3600 } }),
+      getSleep: async (_d: Date) => ({
+        dailySleepDTO: {
+          sleepTimeSeconds: 3600,
+          sleepScores: { overall: { value: 82 } },
+          sleepEndTimestampLocal: '2025-12-24T06:30:00',
+        },
+      }),
       getActivities: async (_start: number, _limit: number) => [
-        { startTimeLocal: '2025-12-24T07:00:00', activityType: 'running', distance: 5000 },
-        { startTimeLocal: '2025-12-24T12:00:00', activityType: 'cycling', distance: 20000 }
-      ]
+        {
+          startTimeLocal: '2025-12-24T07:00:00',
+          activityType: 'running',
+          distance: 5000,
+          avgStress: 35,
+          vO2MaxValue: 49,
+        },
+        { startTimeLocal: '2025-12-24T12:00:00', activityType: 'cycling', distance: 20000, avgStress: 45 }
+      ],
+      getUserProfile: async () => ({ userData: { vo2MaxRunning: 47 } }),
     } as any;
 
     const data = await provider.getData(new Date('2025-12-24'));
@@ -20,6 +33,9 @@ describe('GarminProvider', () => {
     expect(data.weight).toBe(72);
     expect(data.averageHeartRate).toBe(58);
     expect(data.sleep).toBe(60);
+    expect(data.sleepScore).toBe(82);
+    expect(data.stress).toBe(35);
+    expect(data.vo2Max).toBe(49);
     expect(data.didRunning).toBe(true);
     expect(data.runningDistance_km).toBeCloseTo(5.00, 2);
     expect(data.didCycling).toBe(true);
@@ -33,7 +49,7 @@ describe('GarminProvider', () => {
       getWeight: async () => null,
       getHeartRate: async () => null,
       getSleep: async () => null,
-      getActivities: async () => []
+      getActivities: async () => [],
     } as any;
 
     const data = await provider.getData(new Date());
@@ -41,6 +57,66 @@ describe('GarminProvider', () => {
     expect(data.weight).toBeNull();
     expect(data.averageHeartRate).toBeNull();
     expect(data.sleep).toBeNull();
+    expect(data.sleepScore).toBeNull();
+    expect(data.stress).toBeNull();
+    expect(data.vo2Max).toBeNull();
     expect(data.didRunning).toBe(false);
+  });
+
+  test('getData falls back to previous day sleep when it ends on target day', async () => {
+    const provider = new GarminProvider('u', 'p');
+    provider.client = {
+      getSteps: async () => 1000,
+      getWeight: async () => null,
+      getHeartRate: async () => null,
+      getSleep: async (d: Date) => {
+        const day = d.toISOString().slice(0, 10);
+        if (day === '2025-12-24') {
+          return {
+            dailySleepDTO: {
+              sleepTimeSeconds: null,
+              sleepScores: { overall: { value: null } },
+              sleepEndTimestampLocal: '2025-12-25T06:45:00',
+            },
+          };
+        }
+        return {
+          dailySleepDTO: {
+            sleepTimeSeconds: 23400,
+            sleepScores: { overall: { value: 88 } },
+            sleepEndTimestampLocal: '2025-12-25T06:45:00',
+          },
+        };
+      },
+      getActivities: async () => [],
+    } as any;
+
+    const data = await provider.getData(new Date('2025-12-25T12:00:00'));
+
+    expect(data.sleep).toBe(390);
+    expect(data.sleepScore).toBe(88);
+  });
+
+  test('getData uses getSleepDuration fallback when sleep duration is missing', async () => {
+    const provider = new GarminProvider('u', 'p');
+    provider.client = {
+      getSteps: async () => null,
+      getWeight: async () => null,
+      getHeartRate: async () => null,
+      getSleep: async () => ({
+        dailySleepDTO: {
+          sleepTimeSeconds: null,
+          sleepScores: { overall: { value: 75 } },
+          sleepEndTimestampLocal: '2025-12-24T06:30:00',
+        },
+      }),
+      getSleepDuration: async () => 420,
+      getActivities: async () => [],
+    } as any;
+
+    const data = await provider.getData(new Date('2025-12-24T12:00:00'));
+
+    expect(data.sleep).toBe(420);
+    expect(data.sleepScore).toBe(75);
   });
 });

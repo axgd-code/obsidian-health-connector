@@ -479,6 +479,7 @@ function mergeProviderHealthData(entries) {
     steps: maxNullable(allData.map((data) => data.steps)),
     weight: maxNullable(allData.map((data) => data.weight)),
     averageHeartRate: pickAverageHeartRate(entries),
+    vo2Max: maxNullable(allData.map((data) => data.vo2Max)),
     hrv: maxNullable(allData.map((data) => data.hrv)),
     stress: maxNullable(allData.map((data) => data.stress)),
     bodyBattery: maxNullable(allData.map((data) => data.bodyBattery)),
@@ -529,6 +530,7 @@ class WriteHealthFrontmatterUseCase {
     this.set(frontmatter, "sleepScore", data.sleepScore);
     this.set(frontmatter, "weight", data.weight);
     this.set(frontmatter, "averageHeartRate", data.averageHeartRate);
+    this.set(frontmatter, "vo2Max", data.vo2Max);
     this.set(frontmatter, "hrv", data.hrv);
     this.set(frontmatter, "stress", data.stress);
     this.set(frontmatter, "bodyBattery", data.bodyBattery);
@@ -579,6 +581,7 @@ function buildHealthNoteContent(date, data) {
     `sleep: ${yv(data?.sleep)}`,
     `sleepScore: ${yv(data?.sleepScore)}`,
     `averageHeartRate: ${yv(data?.averageHeartRate)}`,
+    `vo2Max: ${yv(data?.vo2Max)}`,
     `hrv: ${yv(data?.hrv)}`,
     `stress: ${yv(data?.stress)}`,
     `bodyBattery: ${yv(data?.bodyBattery)}`,
@@ -27286,17 +27289,8 @@ function requireFunctionBind () {
 	return functionBind;
 }
 
-var functionCall;
-var hasRequiredFunctionCall;
-
-function requireFunctionCall () {
-	if (hasRequiredFunctionCall) return functionCall;
-	hasRequiredFunctionCall = 1;
-
-	/** @type {import('./functionCall')} */
-	functionCall = Function.prototype.call;
-	return functionCall;
-}
+/** @type {import('./functionCall')} */
+var functionCall = Function.prototype.call;
 
 var functionApply;
 var hasRequiredFunctionApply;
@@ -27316,7 +27310,7 @@ var reflectApply = typeof Reflect !== 'undefined' && Reflect && Reflect.apply;
 var bind$2 = requireFunctionBind();
 
 var $apply$1 = requireFunctionApply();
-var $call$2 = requireFunctionCall();
+var $call$2 = functionCall;
 var $reflectApply = reflectApply;
 
 /** @type {import('./actualApply')} */
@@ -27325,7 +27319,7 @@ var actualApply = $reflectApply || bind$2.call($call$2, $apply$1);
 var bind$1 = requireFunctionBind();
 var $TypeError$4 = type;
 
-var $call$1 = requireFunctionCall();
+var $call$1 = functionCall;
 var $actualApply = actualApply;
 
 /** @type {(args: [Function, thisArg?: unknown, ...args: unknown[]]) => Function} TODO FIXME, find a way to use import('.') */
@@ -27484,7 +27478,7 @@ var $ObjectGPO = requireObject_getPrototypeOf();
 var $ReflectGPO = requireReflect_getPrototypeOf();
 
 var $apply = requireFunctionApply();
-var $call = requireFunctionCall();
+var $call = functionCall;
 
 var needsEval = {};
 
@@ -37982,6 +37976,26 @@ let GarminConnect$1 = class GarminConnect {
         this.profileCache.set('profile', profile);
         return profile;
     }
+    async getUserSettings() {
+        return this.client.get(this.url.USER_SETTINGS);
+    }
+    async getUserPerformanceMetrics() {
+        const { userData } = await this.getUserSettings();
+        return {
+            activityLevel: userData.activityLevel,
+            lactateThresholdHeartRate: userData.lactateThresholdHeartRate,
+            lactateThresholdHeartRateCycling: userData.lactateThresholdHeartRateCycling,
+            lactateThresholdHeartRateRowing: userData.lactateThresholdHeartRateRowing,
+            lactateThresholdRowingPace: userData.lactateThresholdRowingPace,
+            lactateThresholdSpeed: userData.lactateThresholdSpeed,
+            moderateIntensityMinutesHrZone: userData.moderateIntensityMinutesHrZone,
+            thresholdHeartRateAutoDetected: userData.thresholdHeartRateAutoDetected,
+            vigorousIntensityMinutesHrZone: userData.vigorousIntensityMinutesHrZone,
+            vo2MaxCycling: userData.vo2MaxCycling,
+            vo2MaxRunning: userData.vo2MaxRunning,
+            weight: userData.weight
+        };
+    }
     async getActivities(start = 0, limit = 20, activityType, subActivityType) {
         return this.client.get(this.url.ACTIVITIES, {
             params: { start, limit, activityType, subActivityType }
@@ -38153,6 +38167,54 @@ function metersToKm(m) {
   if (m === null || m === void 0) return null;
   return Number((m / 1e3).toFixed(2));
 }
+function toNumberOrNull(value) {
+  if (value === null || value === void 0 || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+function parseGarminSleepMetrics(rawSleep) {
+  const dto = rawSleep?.dailySleepDTO;
+  if (!dto) {
+    return { sleepMinutes: null, sleepScore: null, endDate: null };
+  }
+  const sleepTimeSeconds = toNumberOrNull(dto.sleepTimeSeconds);
+  const sleepMinutes = sleepTimeSeconds !== null ? Math.round(sleepTimeSeconds / 60) : null;
+  const sleepScore = toNumberOrNull(dto.sleepScores?.overall?.value) ?? toNumberOrNull(dto.sleepScores?.overallScore) ?? toNumberOrNull(dto.overallSleepScore);
+  const endTimestamp = String(dto.sleepEndTimestampLocal || dto.sleepEndTimestampGMT || "").trim();
+  const endDate = endTimestamp.length >= 10 ? endTimestamp.slice(0, 10) : null;
+  return {
+    sleepMinutes,
+    sleepScore,
+    endDate
+  };
+}
+function extractActivityStress(activity) {
+  const candidates = [
+    activity?.avgStress,
+    activity?.summaryDTO?.avgStress,
+    activity?.startStress,
+    activity?.endStress,
+    activity?.maxStress
+  ];
+  for (const candidate of candidates) {
+    const value = toNumberOrNull(candidate);
+    if (value !== null) return value;
+  }
+  return null;
+}
+function extractActivityVo2Max(activity) {
+  const candidates = [
+    activity?.vO2MaxValue,
+    activity?.vo2MaxValue,
+    activity?.summaryDTO?.vO2MaxValue,
+    activity?.summaryDTO?.vo2MaxValue
+  ];
+  for (const candidate of candidates) {
+    const value = toNumberOrNull(candidate);
+    if (value !== null) return value;
+  }
+  return null;
+}
 class GarminProvider {
   constructor(username, password) {
     this.username = username;
@@ -38206,18 +38268,26 @@ class GarminProvider {
     let didRunning = false, runningDistance = null;
     let didSwimming = false, swimmingDistance = null;
     let didCycling = false, cyclingDistance = null;
+    let activityStress = null;
+    let activityVo2Max = null;
     try {
       const activities = await this.client.getActivities(0, 100).catch(() => null);
       if (activities && Array.isArray(activities)) {
-        const targetDay = targetDate.toISOString().slice(0, 10);
+        const targetDay2 = targetDate.toISOString().slice(0, 10);
         const todays = activities.filter((a) => {
           const s = a.startTimeLocal || a.startTimeGMT || a.startTime;
           if (!s) return false;
-          return s.slice(0, 10) === targetDay;
+          return s.slice(0, 10) === targetDay2;
         });
         for (const a of todays) {
           const lower = JSON.stringify(a).toLowerCase();
           const dist = extractDistanceFromActivity(a);
+          if (activityStress === null) {
+            activityStress = extractActivityStress(a);
+          }
+          if (activityVo2Max === null) {
+            activityVo2Max = extractActivityVo2Max(a);
+          }
           if (!didRunning && /run|running/.test(lower)) {
             didRunning = true;
             if (dist != null) runningDistance = metersToKm(dist);
@@ -38236,37 +38306,58 @@ class GarminProvider {
     }
     let sleepMinutes = null;
     let sleepScore = null;
+    const targetDay = targetDate.toISOString().slice(0, 10);
+    const previousDate = new Date(targetDate);
+    previousDate.setDate(previousDate.getDate() - 1);
     try {
-      if (sleepData && sleepData.dailySleepDTO) {
-        const dto = sleepData.dailySleepDTO;
-        if (dto.sleepTimeSeconds) {
-          sleepMinutes = Math.round(dto.sleepTimeSeconds / 60);
+      const todaySleep = parseGarminSleepMetrics(sleepData);
+      let chosenSleep = todaySleep;
+      if (todaySleep.sleepScore === null || todaySleep.sleepMinutes === null || todaySleep.endDate !== targetDay) {
+        const previousSleepRaw = await this.client.getSleep(previousDate).catch(() => null);
+        const previousSleep = parseGarminSleepMetrics(previousSleepRaw);
+        if (previousSleep.endDate === targetDay && (previousSleep.sleepScore !== null || previousSleep.sleepMinutes !== null)) {
+          chosenSleep = {
+            sleepMinutes: previousSleep.sleepMinutes ?? todaySleep.sleepMinutes,
+            sleepScore: previousSleep.sleepScore ?? todaySleep.sleepScore,
+            endDate: previousSleep.endDate
+          };
         }
-        if (dto.sleepScores?.overall?.value) {
-          sleepScore = dto.sleepScores.overall.value;
-        }
-        logger.debug("\u{1F6CF}\uFE0F Sleep data:", {
-          minutes: sleepMinutes,
-          score: sleepScore,
-          deepMin: Math.round((dto.deepSleepSeconds || 0) / 60),
-          lightMin: Math.round((dto.lightSleepSeconds || 0) / 60),
-          remMin: Math.round((dto.remSleepSeconds || 0) / 60)
-        });
       }
+      sleepMinutes = chosenSleep.sleepMinutes;
+      sleepScore = chosenSleep.sleepScore;
+      if (sleepMinutes === null) {
+        const todayDuration = toNumberOrNull(await this.client.getSleepDuration?.(targetDate).catch(() => null));
+        const previousDuration = todayDuration === null ? toNumberOrNull(await this.client.getSleepDuration?.(previousDate).catch(() => null)) : null;
+        const resolvedDuration = todayDuration ?? previousDuration;
+        if (resolvedDuration !== null) {
+          sleepMinutes = Math.round(resolvedDuration);
+        }
+      }
+      logger.debug("\u{1F6CF}\uFE0F Sleep data:", {
+        targetDay,
+        sleepMinutes,
+        sleepScore,
+        sleepEndDate: chosenSleep.endDate
+      });
     } catch (e) {
       sleepMinutes = null;
       sleepScore = null;
     }
+    let vo2Max = null;
     let hrv = null;
     let stress = null;
     let bodyBattery = null;
     let spO2 = null;
     try {
-      const stressData = await this.client.getStress?.(targetDate).catch(() => null);
-      const stressAny = stressData;
-      const stressVal = stressAny?.averageStressLevel ?? stressAny?.avgStressLevel ?? stressAny?.stressLevel;
-      if (stressVal !== void 0 && stressVal !== null && !isNaN(Number(stressVal))) {
-        stress = Number(stressVal);
+      stress = activityStress;
+    } catch {
+    }
+    try {
+      vo2Max = activityVo2Max;
+      if (vo2Max === null) {
+        const profile = await this.client.getUserProfile?.().catch(() => null);
+        const profileVo2 = toNumberOrNull(profile?.userData?.vo2MaxRunning) ?? toNumberOrNull(profile?.userData?.vo2MaxCycling) ?? toNumberOrNull(profile?.vo2MaxRunning) ?? toNumberOrNull(profile?.vo2MaxCycling);
+        vo2Max = profileVo2;
       }
     } catch {
     }
@@ -38302,6 +38393,7 @@ class GarminProvider {
       steps: steps ?? null,
       weight,
       averageHeartRate: avgHeartRate,
+      vo2Max,
       hrv,
       stress,
       bodyBattery,
@@ -38460,6 +38552,7 @@ class StravaProvider {
       steps: null,
       weight: null,
       averageHeartRate,
+      vo2Max: null,
       hrv: null,
       stress: null,
       bodyBattery: null,
@@ -38778,6 +38871,7 @@ class GoogleHealthProvider {
       steps,
       weight,
       averageHeartRate,
+      vo2Max: null,
       hrv: null,
       stress: null,
       bodyBattery: null,
@@ -39470,6 +39564,7 @@ class HealthConnectorPlugin extends obsidian.Plugin {
       sleep: provider?.sleep ?? null,
       sleepScore: provider?.sleepScore ?? null,
       averageHeartRate: provider?.averageHeartRate ?? null,
+      vo2Max: provider?.vo2Max ?? null,
       runningDistance_km: provider?.runningDistance_km ?? null,
       SwimmingDistance_km: provider?.SwimmingDistance_km ?? null,
       // backward-compat stubs

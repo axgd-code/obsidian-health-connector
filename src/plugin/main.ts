@@ -276,6 +276,7 @@ export default class HealthConnectorPlugin extends Plugin {
       sleep:            provider?.sleep            ?? null,
       sleepScore:       provider?.sleepScore       ?? null,
       averageHeartRate: provider?.averageHeartRate ?? null,
+      vo2Max:           provider?.vo2Max           ?? null,
       runningDistance_km:  provider?.runningDistance_km  ?? null,
       SwimmingDistance_km: provider?.SwimmingDistance_km ?? null,
       // backward-compat stubs

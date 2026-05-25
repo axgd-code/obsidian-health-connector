@@ -16,6 +16,7 @@ export function buildHealthNoteContent(date: Date, data: HealthData | null): str
     `sleep: ${yv(data?.sleep)}`,
     `sleepScore: ${yv(data?.sleepScore)}`,
     `averageHeartRate: ${yv(data?.averageHeartRate)}`,
+    `vo2Max: ${yv(data?.vo2Max)}`,
     `hrv: ${yv(data?.hrv)}`,
     `stress: ${yv(data?.stress)}`,
     `bodyBattery: ${yv(data?.bodyBattery)}`,

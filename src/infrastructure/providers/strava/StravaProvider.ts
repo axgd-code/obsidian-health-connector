@@ -181,6 +181,7 @@ export class StravaProvider implements IHealthProvider {
       steps: null,
       weight: null,
       averageHeartRate,
+      vo2Max: null,
       hrv: null,
       stress: null,
       bodyBattery: null,

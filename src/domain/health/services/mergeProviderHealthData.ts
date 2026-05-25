@@ -34,6 +34,7 @@ export function mergeProviderHealthData(entries: ProviderHealthDataEntry[]): Hea
     steps: maxNullable(allData.map((data) => data.steps)),
     weight: maxNullable(allData.map((data) => data.weight)),
     averageHeartRate: pickAverageHeartRate(entries),
+    vo2Max: maxNullable(allData.map((data) => data.vo2Max)),
     hrv: maxNullable(allData.map((data) => data.hrv)),
     stress: maxNullable(allData.map((data) => data.stress)),
     bodyBattery: maxNullable(allData.map((data) => data.bodyBattery)),

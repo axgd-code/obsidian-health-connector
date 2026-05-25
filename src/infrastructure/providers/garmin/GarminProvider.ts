@@ -32,6 +32,69 @@ function metersToKm(m: number | null): number | null {
   return Number((m / 1000).toFixed(2));
 }
 
+function toNumberOrNull(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function parseGarminSleepMetrics(rawSleep: any): { sleepMinutes: number | null; sleepScore: number | null; endDate: string | null } {
+  const dto = rawSleep?.dailySleepDTO;
+  if (!dto) {
+    return { sleepMinutes: null, sleepScore: null, endDate: null };
+  }
+
+  const sleepTimeSeconds = toNumberOrNull(dto.sleepTimeSeconds);
+  const sleepMinutes = sleepTimeSeconds !== null ? Math.round(sleepTimeSeconds / 60) : null;
+
+  const sleepScore =
+    toNumberOrNull(dto.sleepScores?.overall?.value) ??
+    toNumberOrNull(dto.sleepScores?.overallScore) ??
+    toNumberOrNull(dto.overallSleepScore);
+
+  const endTimestamp = String(dto.sleepEndTimestampLocal || dto.sleepEndTimestampGMT || '').trim();
+  const endDate = endTimestamp.length >= 10 ? endTimestamp.slice(0, 10) : null;
+
+  return {
+    sleepMinutes,
+    sleepScore,
+    endDate,
+  };
+}
+
+function extractActivityStress(activity: any): number | null {
+  const candidates = [
+    activity?.avgStress,
+    activity?.summaryDTO?.avgStress,
+    activity?.startStress,
+    activity?.endStress,
+    activity?.maxStress,
+  ];
+
+  for (const candidate of candidates) {
+    const value = toNumberOrNull(candidate);
+    if (value !== null) return value;
+  }
+
+  return null;
+}
+
+function extractActivityVo2Max(activity: any): number | null {
+  const candidates = [
+    activity?.vO2MaxValue,
+    activity?.vo2MaxValue,
+    activity?.summaryDTO?.vO2MaxValue,
+    activity?.summaryDTO?.vo2MaxValue,
+  ];
+
+  for (const candidate of candidates) {
+    const value = toNumberOrNull(candidate);
+    if (value !== null) return value;
+  }
+
+  return null;
+}
+
 export class GarminProvider implements IHealthProvider {
   public client: any;
   private username: string;
@@ -95,6 +158,8 @@ export class GarminProvider implements IHealthProvider {
     let didRunning = false, runningDistance: number | null = null;
     let didSwimming = false, swimmingDistance: number | null = null;
     let didCycling = false, cyclingDistance: number | null = null;
+    let activityStress: number | null = null;
+    let activityVo2Max: number | null = null;
     try {
       const activities = await this.client.getActivities(0, 100).catch(() => null);
       if (activities && Array.isArray(activities)) {
@@ -107,6 +172,15 @@ export class GarminProvider implements IHealthProvider {
         for (const a of todays) {
           const lower = JSON.stringify(a).toLowerCase();
           const dist = extractDistanceFromActivity(a);
+
+          if (activityStress === null) {
+            activityStress = extractActivityStress(a);
+          }
+
+          if (activityVo2Max === null) {
+            activityVo2Max = extractActivityVo2Max(a);
+          }
+
           if (!didRunning && /run|running/.test(lower)) {
             didRunning = true;
             if (dist != null) runningDistance = metersToKm(dist);
@@ -125,40 +199,75 @@ export class GarminProvider implements IHealthProvider {
 
     let sleepMinutes: number | null = null;
     let sleepScore: number | null = null;
+    const targetDay = targetDate.toISOString().slice(0, 10);
+    const previousDate = new Date(targetDate);
+    previousDate.setDate(previousDate.getDate() - 1);
     try {
-      if (sleepData && sleepData.dailySleepDTO) {
-        const dto = sleepData.dailySleepDTO;
-        if (dto.sleepTimeSeconds) {
-          sleepMinutes = Math.round(dto.sleepTimeSeconds / 60);
+      const todaySleep = parseGarminSleepMetrics(sleepData);
+      let chosenSleep = todaySleep;
+
+      // Garmin sleep often belongs to the previous evening but ends on the target day.
+      if (todaySleep.sleepScore === null || todaySleep.sleepMinutes === null || todaySleep.endDate !== targetDay) {
+        const previousSleepRaw = await this.client.getSleep(previousDate).catch(() => null);
+        const previousSleep = parseGarminSleepMetrics(previousSleepRaw);
+
+        if (previousSleep.endDate === targetDay && (previousSleep.sleepScore !== null || previousSleep.sleepMinutes !== null)) {
+          chosenSleep = {
+            sleepMinutes: previousSleep.sleepMinutes ?? todaySleep.sleepMinutes,
+            sleepScore: previousSleep.sleepScore ?? todaySleep.sleepScore,
+            endDate: previousSleep.endDate,
+          };
         }
-        if (dto.sleepScores?.overall?.value) {
-          sleepScore = dto.sleepScores.overall.value;
-        }
-        logger.debug('🛏️ Sleep data:', {
-          minutes: sleepMinutes,
-          score: sleepScore,
-          deepMin: Math.round((dto.deepSleepSeconds || 0) / 60),
-          lightMin: Math.round((dto.lightSleepSeconds || 0) / 60),
-          remMin: Math.round((dto.remSleepSeconds || 0) / 60)
-        });
       }
+
+      sleepMinutes = chosenSleep.sleepMinutes;
+      sleepScore = chosenSleep.sleepScore;
+
+      // Fallback to dedicated duration endpoint when sleep payload has no duration.
+      if (sleepMinutes === null) {
+        const todayDuration = toNumberOrNull(await this.client.getSleepDuration?.(targetDate).catch(() => null));
+        const previousDuration =
+          todayDuration === null
+            ? toNumberOrNull(await this.client.getSleepDuration?.(previousDate).catch(() => null))
+            : null;
+        const resolvedDuration = todayDuration ?? previousDuration;
+        if (resolvedDuration !== null) {
+          sleepMinutes = Math.round(resolvedDuration);
+        }
+      }
+
+      logger.debug('🛏️ Sleep data:', {
+        targetDay,
+        sleepMinutes,
+        sleepScore,
+        sleepEndDate: chosenSleep.endDate,
+      });
     } catch (e) {
       sleepMinutes = null;
       sleepScore = null;
     }
 
     // Optional Garmin metrics (availability depends on account/device/API capabilities)
+    let vo2Max: number | null = null;
     let hrv: number | null = null;
     let stress: number | null = null;
     let bodyBattery: number | null = null;
     let spO2: number | null = null;
 
     try {
-      const stressData = await this.client.getStress?.(targetDate).catch(() => null);
-      const stressAny = stressData as any;
-      const stressVal = stressAny?.averageStressLevel ?? stressAny?.avgStressLevel ?? stressAny?.stressLevel;
-      if (stressVal !== undefined && stressVal !== null && !isNaN(Number(stressVal))) {
-        stress = Number(stressVal);
+      stress = activityStress;
+    } catch {}
+
+    try {
+      vo2Max = activityVo2Max;
+      if (vo2Max === null) {
+        const profile = await this.client.getUserProfile?.().catch(() => null);
+        const profileVo2 =
+          toNumberOrNull(profile?.userData?.vo2MaxRunning) ??
+          toNumberOrNull(profile?.userData?.vo2MaxCycling) ??
+          toNumberOrNull(profile?.vo2MaxRunning) ??
+          toNumberOrNull(profile?.vo2MaxCycling);
+        vo2Max = profileVo2;
       }
     } catch {}
 
@@ -195,6 +304,7 @@ export class GarminProvider implements IHealthProvider {
       steps: steps ?? null,
       weight,
       averageHeartRate: avgHeartRate,
+      vo2Max,
       hrv,
       stress,
       bodyBattery,

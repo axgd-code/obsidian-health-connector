@@ -1,6 +1,6 @@
 {
   "name": "health-connector",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "scripts": {
     "sync:version": "node scripts/sync_versions.js",
     "dev": "rollup -c --bundleConfigAsCjs -w",
@@ -26,6 +26,6 @@
     "vitest": "^4.0.16"
   },
   "dependencies": {
-    "garmin-connect-obsidian": "1.0.2"
+    "garmin-connect-obsidian": "1.0.3"
   }
 }

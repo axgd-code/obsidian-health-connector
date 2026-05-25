@@ -2,6 +2,7 @@ export interface HealthData {
   steps: number | null;
   weight: number | null;
   averageHeartRate: number | null;
+  vo2Max: number | null;
   hrv: number | null;
   stress: number | null;
   bodyBattery: number | null;

@@ -27,6 +27,7 @@ export class WriteHealthFrontmatterUseCase<TFile = unknown> {
     this.set(frontmatter, 'sleepScore', data.sleepScore);
     this.set(frontmatter, 'weight', data.weight);
     this.set(frontmatter, 'averageHeartRate', data.averageHeartRate);
+    this.set(frontmatter, 'vo2Max', data.vo2Max);
     this.set(frontmatter, 'hrv', data.hrv);
     this.set(frontmatter, 'stress', data.stress);
     this.set(frontmatter, 'bodyBattery', data.bodyBattery);

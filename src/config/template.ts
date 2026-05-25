@@ -27,6 +27,7 @@ export function buildGarminFrontmatter(date: Date, data: any): string {
   if (data.sleepScore !== null && data.sleepScore !== undefined) fm += `sleepScore: ${data.sleepScore}\n`;
   if (data.weight !== null && data.weight !== undefined) fm += `weight: ${data.weight}\n`;
   if (data.averageHeartRate !== null && data.averageHeartRate !== undefined) fm += `averageHeartRate: ${data.averageHeartRate}\n`;
+  if (data.vo2Max !== null && data.vo2Max !== undefined) fm += `vo2Max: ${data.vo2Max}\n`;
   if (data.hrv !== null && data.hrv !== undefined) fm += `hrv: ${data.hrv}\n`;
   if (data.stress !== null && data.stress !== undefined) fm += `stress: ${data.stress}\n`;
   if (data.bodyBattery !== null && data.bodyBattery !== undefined) fm += `bodyBattery: ${data.bodyBattery}\n`;
