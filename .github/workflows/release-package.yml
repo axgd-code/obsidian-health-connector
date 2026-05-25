@@ -25,16 +25,12 @@ jobs:
       - name: Build plugin
         run: npm run build
 
-      - name: Create release package
-        run: |
-          mkdir release
-          cp main.js manifest.json styles.css release/
-          cd release
-          zip -r ../plugin-package.zip .
-
-      - name: Upload release asset
+      - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
-          files: plugin-package.zip
+          files: |
+            main.js
+            styles.css
+            manifest.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
