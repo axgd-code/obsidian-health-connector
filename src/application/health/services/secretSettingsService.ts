@@ -93,9 +93,14 @@ export class SecretSettingsService {
 
   sanitizeSettingsForPersist(settings: Record<string, unknown>) {
     for (const { field } of LEGACY_SECRET_FIELDS) {
-      settings[field] = '';
+      delete settings[field];
     }
     delete settings.tokens;
+  }
+
+  hasLegacySensitiveFields(settings: Record<string, unknown>): boolean {
+    if ('tokens' in settings) return true;
+    return LEGACY_SECRET_FIELDS.some(({ field }) => field in settings);
   }
 
   migrateLegacySecretsFromSettings(settings: Record<string, unknown>): boolean {
@@ -104,10 +109,11 @@ export class SecretSettingsService {
     for (const { field, secret } of LEGACY_SECRET_FIELDS) {
       const raw = settings[field];
       const value = typeof raw === 'string' ? raw.trim() : '';
-      if (!value) continue;
-      this.set(secret, value);
-      settings[field] = '';
-      migrated = true;
+      if (value) {
+        this.set(secret, value);
+        migrated = true;
+      }
+      delete settings[field];
     }
 
     return migrated;

@@ -374,8 +374,11 @@ export default class HealthConnectorPlugin extends Plugin {
   }
 
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-    this._secretSettings.sanitizeSettingsForPersist(this.settings as unknown as Record<string, unknown>);
+    const persisted = (await this.loadData()) || {};
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, persisted);
+    const hadLegacySensitiveFields = this._secretSettings.hasLegacySensitiveFields(
+      persisted as Record<string, unknown>,
+    );
 
     const migrated = this._secretSettings.migrateLegacySecretsFromSettings(this.settings as unknown as Record<string, unknown>);
 
@@ -395,7 +398,7 @@ export default class HealthConnectorPlugin extends Plugin {
     }
 
     this._secretSettings.sanitizeSettingsForPersist(this.settings as unknown as Record<string, unknown>);
-    if (migrated) {
+    if (migrated || hadLegacySensitiveFields) {
       await this.saveSettings();
     }
   }

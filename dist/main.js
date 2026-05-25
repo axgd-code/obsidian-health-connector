@@ -651,19 +651,24 @@ class SecretSettingsService {
   }
   sanitizeSettingsForPersist(settings) {
     for (const { field } of LEGACY_SECRET_FIELDS) {
-      settings[field] = "";
+      delete settings[field];
     }
     delete settings.tokens;
+  }
+  hasLegacySensitiveFields(settings) {
+    if ("tokens" in settings) return true;
+    return LEGACY_SECRET_FIELDS.some(({ field }) => field in settings);
   }
   migrateLegacySecretsFromSettings(settings) {
     let migrated = false;
     for (const { field, secret } of LEGACY_SECRET_FIELDS) {
       const raw = settings[field];
       const value = typeof raw === "string" ? raw.trim() : "";
-      if (!value) continue;
-      this.set(secret, value);
-      settings[field] = "";
-      migrated = true;
+      if (value) {
+        this.set(secret, value);
+        migrated = true;
+      }
+      delete settings[field];
     }
     return migrated;
   }
@@ -27281,8 +27286,17 @@ function requireFunctionBind () {
 	return functionBind;
 }
 
-/** @type {import('./functionCall')} */
-var functionCall = Function.prototype.call;
+var functionCall;
+var hasRequiredFunctionCall;
+
+function requireFunctionCall () {
+	if (hasRequiredFunctionCall) return functionCall;
+	hasRequiredFunctionCall = 1;
+
+	/** @type {import('./functionCall')} */
+	functionCall = Function.prototype.call;
+	return functionCall;
+}
 
 var functionApply;
 var hasRequiredFunctionApply;
@@ -27302,7 +27316,7 @@ var reflectApply = typeof Reflect !== 'undefined' && Reflect && Reflect.apply;
 var bind$2 = requireFunctionBind();
 
 var $apply$1 = requireFunctionApply();
-var $call$2 = functionCall;
+var $call$2 = requireFunctionCall();
 var $reflectApply = reflectApply;
 
 /** @type {import('./actualApply')} */
@@ -27311,7 +27325,7 @@ var actualApply = $reflectApply || bind$2.call($call$2, $apply$1);
 var bind$1 = requireFunctionBind();
 var $TypeError$4 = type;
 
-var $call$1 = functionCall;
+var $call$1 = requireFunctionCall();
 var $actualApply = actualApply;
 
 /** @type {(args: [Function, thisArg?: unknown, ...args: unknown[]]) => Function} TODO FIXME, find a way to use import('.') */
@@ -27470,7 +27484,7 @@ var $ObjectGPO = requireObject_getPrototypeOf();
 var $ReflectGPO = requireReflect_getPrototypeOf();
 
 var $apply = requireFunctionApply();
-var $call = functionCall;
+var $call = requireFunctionCall();
 
 var needsEval = {};
 
@@ -39547,8 +39561,11 @@ class HealthConnectorPlugin extends obsidian.Plugin {
     await this.addDataToFile(file, date, data);
   }
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-    this._secretSettings.sanitizeSettingsForPersist(this.settings);
+    const persisted = await this.loadData() || {};
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, persisted);
+    const hadLegacySensitiveFields = this._secretSettings.hasLegacySensitiveFields(
+      persisted
+    );
     const migrated = this._secretSettings.migrateLegacySecretsFromSettings(this.settings);
     if (!this.settings.googleClientId && String("").trim()) {
       this.settings.googleClientId = String("").trim();
@@ -39563,7 +39580,7 @@ class HealthConnectorPlugin extends obsidian.Plugin {
       else this.settings.enabledProviders = ["garmin"];
     }
     this._secretSettings.sanitizeSettingsForPersist(this.settings);
-    if (migrated) {
+    if (migrated || hadLegacySensitiveFields) {
       await this.saveSettings();
     }
   }
